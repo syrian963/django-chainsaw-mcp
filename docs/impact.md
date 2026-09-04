@@ -153,6 +153,34 @@ point this can see reaches the finding**, and the two ordinary reasons are:
 - A call the graph could not resolve — a callable passed as an argument, a
   method looked up by name, a `getattr`.
 
+### Unresolved is not unreached
+
+```python
+for target in targets:
+    target.recalculate([])
+```
+
+That line plainly calls `recalculate`. Which class `target` is cannot be
+decided without type inference, so the graph records the call as unresolved —
+and reporting "nothing calls it" about the method would be a confident wrong
+answer about a line that visibly does. Those findings are counted in
+`unattributed_because_the_receiver_is_unknown` and the reason says how many
+call sites name the method and how many functions in the project share that
+name:
+
+```
+  of those, 201 sit in a method that something calls by name, on an object
+  this cannot identify: not unreached, unresolved.
+```
+
+Resolving them by name was measured before it was rejected. On a project of
+11300 functions, a rule matching a unique method name would have resolved 8% of
+the unresolved calls and attributed **25** more findings — for the price of
+sometimes attributing one to the wrong endpoint. The names that actually block
+attribution are `copy` and `update`, which several classes define, so the rule
+would not have helped where it mattered. Reporting the ambiguity is worth more
+than guessing at it.
+
 Findings with no file and line at all — a migration, a template, a model-level
 verdict — are counted separately in `without_a_location_count`, because there
 is nothing to attribute them from. A serializer used to be in that list and no

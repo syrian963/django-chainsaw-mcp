@@ -75,6 +75,19 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **"Nothing calls this" is now two different answers.** A method invoked as
+  `target.recalculate()` cannot be resolved without type inference, and saying
+  nothing calls it is a confident wrong answer about a line that visibly does.
+  A finding whose holder is named by an unresolved call site now says so, with
+  the number of call sites and how many functions share the name, and is
+  counted in `unattributed_because_the_receiver_is_unknown`. On a large real
+  project that is 201 of the 363 unattributed findings - a majority that was
+  being reported as unreached.
+- Resolving those by a unique method name was measured and rejected: it would
+  have resolved 8% of unresolved calls and attributed 25 more findings, and the
+  names that actually block attribution (`copy`, `update`) are shared by
+  several classes, so the rule would not have helped where it mattered.
+
 - **The call graph is built once per tree instead of once per check.** Seven
   analyses build one, and `check` runs all of them: on a project of 2100 files
   that was seven full parses of the same unchanged source. A stat-only

@@ -72,3 +72,19 @@ class ManualReportView(APIView):
     def get(self, request):
         orders = Order.objects.all()
         return Response(ManualOrderSerializer(orders, many=True).data)
+
+
+class Recalculator:
+    """Called through a variable, which is where static resolution ends."""
+
+    def recalculate(self, orders):
+        for order in orders:
+            Customer.objects.get(pk=order.customer_id)
+
+
+def run_each(targets):
+    for target in targets:
+        # `target` could be anything. Which `recalculate` this is cannot be
+        # decided without type inference - but "nothing calls it" would be a
+        # confident wrong answer, because this line plainly does.
+        target.recalculate([])

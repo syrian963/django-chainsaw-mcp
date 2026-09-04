@@ -1749,3 +1749,28 @@ def test_one_field_reached_by_two_roots_gives_two_distinguishable_findings():
     ]
     assert len(titles) > 1
     assert len(set(titles)) == len(titles), titles
+
+
+def test_a_method_called_through_a_variable_is_unresolved_not_unreached():
+    # `target.recalculate([])` plainly calls it. Which class `target` is
+    # cannot be decided without type inference, and reporting "nothing calls
+    # it" would be a confident wrong answer about a line that does.
+    report = _impact()
+    assert report["unattributed_because_the_receiver_is_unknown"] >= 1
+    reasons = [
+        f["reason"] for f in report["unattributed"]
+        if "recalculate" in f["reason"]
+    ]
+    assert reasons, "the holder was not reported as called by name"
+    assert "cannot be decided" in reasons[0]
+
+
+def test_a_function_nothing_mentions_says_so_plainly():
+    report = _impact()
+    plain = [
+        f for f in report["unattributed"]
+        if f["reason"].startswith("nothing in the project calls")
+    ]
+    # The fixture helpers really are called by nothing, and that is a
+    # different answer from "called, receiver unknown".
+    assert plain

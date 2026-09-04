@@ -224,6 +224,29 @@ def entry_points(graph: CallGraph) -> dict[str, dict[str, Any]]:
     return found
 
 
+def _called_by_name(graph: CallGraph) -> dict[str, set[str]]:
+    """Bare method name -> the functions that call something by that name.
+
+    Half the calls in a large project cannot be resolved to a definition:
+    `order.copy()` names a method, and which class `order` is cannot be
+    decided without type inference. Those are not evidence of nothing calling
+    the method - they are evidence of exactly the opposite, and reporting
+    "nothing calls it" when 65 sites call something with that name is a
+    confident wrong answer.
+
+    Resolving them by name was measured before it was rejected: on a project
+    of 11300 functions a unique-name rule would have resolved 8% of the
+    unresolved calls and attributed 25 more findings, for the price of
+    attributing some of them to the wrong endpoint. Reporting the ambiguity is
+    worth more than guessing at it.
+    """
+    out: dict[str, set[str]] = {}
+    for qualname, fn in graph.functions.items():
+        for dotted in fn.unresolved:
+            out.setdefault(dotted.rsplit(".", 1)[-1], set()).add(qualname)
+    return out
+
+
 def _callers(graph: CallGraph) -> dict[str, set[str]]:
     """callee -> the functions that call it."""
     reverse: dict[str, set[str]] = {}
@@ -450,6 +473,7 @@ def impact(
 
     entries = entry_points(graph)
     reverse = _callers(graph)
+    by_name = _called_by_name(graph)
     index = _by_file(graph)
     serving, serving_error = _serializer_map(root)
     owners = {
@@ -537,7 +561,22 @@ def impact(
 
         hits = _reaching(reverse, holder, entries, max_depth)
         if not hits:
-            unattributed.append({**finding, "reason": f"nothing calls {holder}"})
+            fn = graph.functions[holder]
+            sites = by_name.get(fn.name, ())
+            if sites:
+                sharing = sum(
+                    1 for other in graph.functions.values() if other.name == fn.name
+                )
+                reason = (
+                    f"{len(sites)} call site(s) name .{fn.name}(), but which "
+                    "object they are called on cannot be decided without type "
+                    "inference"
+                    + (f"; {sharing} functions in the project share that name"
+                       if sharing > 1 else "")
+                )
+            else:
+                reason = f"nothing in the project calls {holder}"
+            unattributed.append({**finding, "reason": reason})
             continue
 
         for entry, path in hits.items():
@@ -585,6 +624,9 @@ def impact(
         "entry_points": ranked,
         "findings_considered": len(report.get("findings", [])),
         "unattributed_count": len(unattributed),
+        "unattributed_because_the_receiver_is_unknown": sum(
+            1 for f in unattributed if "cannot be decided" in f["reason"]
+        ),
         "unattributed": unattributed,
         "without_a_location_count": len(no_location),
         "max_depth": max_depth,
@@ -598,8 +640,12 @@ def impact(
             "URLconf is read, so plain function views are found; without one "
             "- a non-Django project, or a settings module that could not be "
             "loaded - a view with no decorator and no view class is invisible "
-            "and its findings land there. Findings "
-            "with no file and line, such as a migration or a serializer "
-            "class, are counted separately and cannot be attributed at all."
+            "and its findings land there. A finding whose holder is a "
+            "method that something calls by name, on an object that cannot be "
+            "identified without type inference, is counted in "
+            "`unattributed_because_the_receiver_is_unknown`: that one is not "
+            "unreached, it is unresolved, and the two are different answers. "
+            "Findings with no file and line at all, such as a migration or a "
+            "template, are counted separately and cannot be attributed."
         ),
     }

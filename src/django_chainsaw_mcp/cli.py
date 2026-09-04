@@ -764,9 +764,15 @@ def _cmd_impact(args: argparse.Namespace) -> int:
             if extra > 0:
                 print(f"            ... and {extra} more")
             print()
+        unknown = report["unattributed_because_the_receiver_is_unknown"]
         print(f"{report['unattributed_count']} finding(s) reached by no entry point "
               f"this can see, {report['without_a_location_count']} with no file and "
               "line to attribute.")
+        if unknown:
+            print(f"  of those, {unknown} "
+                  + ("sits" if unknown == 1 else "sit")
+                  + " in a method that something calls by name, on an object "
+                    "this cannot identify: not unreached, unresolved.")
         print()
         print(report["note"])
 
