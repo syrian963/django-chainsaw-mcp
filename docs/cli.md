@@ -234,6 +234,16 @@ django-chainsaw sqla [--search-path DIR] [--fail-on-findings]
 SQLAlchemy relationships crossed per row: inside a loop, and during response
 serialisation where there is no loop to see. Needs no Django.
 
+### `amplification`
+
+```bash
+django-chainsaw amplification [--search-path DIR] [--fail-on-findings]
+```
+
+Endpoints that are both reachable without credentials and expensive to answer,
+or public and unpaginated. Works on Django (DRF views) and FastAPI. Neither
+half is a finding alone.
+
 ### `indexes`
 
 ```bash

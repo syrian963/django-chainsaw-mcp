@@ -242,6 +242,11 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
         models.update(index.models)
 
     findings: list[dict[str, Any]] = []
+    # Every route, with what it declares and whether anything authenticates it.
+    # The findings alone are not the inventory: a bounded route with no
+    # authentication produces no finding here and is still the interesting half
+    # of an amplification question.
+    inventory: list[dict[str, Any]] = []
     routes = 0
 
     for relative, (tree, lines) in sorted(trees.items()):
@@ -259,6 +264,16 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
 
             declared = route["response_model"] or _annotation_name(node.returns)
             authed, how = _has_auth(node, route["decorator_dependencies"])
+            inventory.append({
+                "file": relative,
+                "line": node.lineno,
+                "endpoint": node.name,
+                "method": route["method"],
+                "path": route["path"],
+                "response_model": declared,
+                "authenticated": authed,
+                "auth_via": how,
+            })
 
             if route["response_model_dynamic"]:
                 findings.append(_finding(
@@ -315,6 +330,8 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
         "search_path": str(root),
         "frameworks": dict(found.frameworks),
         "routes_found": routes,
+        "routes": inventory,
+        "unauthenticated_route_count": sum(1 for r in inventory if not r["authenticated"]),
         "models_found": len(models),
         "finding_count": len(findings),
         "critical_count": sum(1 for f in findings if f["severity"] == "critical"),

@@ -1261,3 +1261,54 @@ def test_every_check_declares_what_it_needs():
 
     assert set(_REQUIRES) == set(ALL_CHECKS)
     assert set(_REQUIRES.values()) <= {"django", "fastapi", "sqlalchemy", "any"}
+
+
+def _amplification(root=None):
+    from django_chainsaw_mcp.amplification import amplification
+
+    report = amplification(search_path=root)
+    return {f["endpoint"]: f for f in report["findings"]}, report
+
+
+def test_a_public_expensive_endpoint_is_the_finding_neither_half_makes():
+    # SlowOrderViewSet has no permission class and costs ~2851 queries. Open
+    # is fine on a catalogue; expensive is fine behind a login. Together they
+    # are one request from anyone that costs the database three thousand.
+    found, _ = _amplification()
+    entry = found["shop.viewsets.SlowOrderViewSet"]
+    assert entry["severity"] == "critical"
+    assert entry["estimated_queries"] > 1000
+    assert "no credentials" in entry["why"]
+
+
+def test_a_public_but_cheap_endpoint_is_high_not_critical():
+    # Unpaginated and public is real - it is the whole table - but putting it
+    # next to a 2851-query endpoint under the same label buries that one.
+    found, _ = _amplification()
+    assert found["shop.viewsets.WellTunedOrderViewSet"]["severity"] == "high"
+    assert found["shop.viewsets.WellTunedOrderViewSet"]["estimated_queries"] < 100
+
+
+def test_the_fastapi_half_joins_on_the_route_inventory_not_the_findings():
+    # GET /orders declares a narrow response_model, so it produces no exposure
+    # finding at all - and it is still reachable by anyone and still walks a
+    # relationship per row, which is the entire point.
+    found, report = _amplification(_fastapi_root())
+    assert report["critical_count"] >= 1
+    entry = found["GET /orders"]
+    assert entry["framework"] == "fastapi"
+    assert "Order.items" in entry["relationships_per_row"]
+
+
+def test_a_route_behind_a_dependency_is_not_an_amplification_surface():
+    _, report = _amplification(_fastapi_root())
+    endpoints = {f.get("function") for f in report["findings"]}
+    assert "me" not in endpoints
+
+
+def test_half_an_answer_is_reported_as_half_an_answer():
+    # If one of the two underlying checks cannot run, the result is not a
+    # clean bill of health and has to say so.
+    _, report = _amplification()
+    assert "checks_that_could_not_run" in report
+    assert report["checks_that_could_not_run"] == []

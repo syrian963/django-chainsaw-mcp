@@ -19,6 +19,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from .amplification import amplification as _amplification
 from .asyncio_blocking import blocking_in_async as _blocking_in_async
 from .cascade import delete_impact as _delete_impact
 from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
@@ -473,6 +474,34 @@ def sqlalchemy_nplusone(search_path: str | None = None) -> dict[str, Any]:
         search_path: directory to scan. Defaults to the configured project.
     """
     return _guard(_sqlalchemy_nplusone, search_path=search_path)
+
+
+@mcp.tool()
+def amplification(search_path: str | None = None) -> dict[str, Any]:
+    """Endpoints anyone can call that cost a great deal to answer.
+
+    Two facts, each of which is somebody else's finding and neither of which
+    is wrong alone:
+
+        GET /orders has no authentication.
+        GET /orders issues about 2852 queries per request.
+
+    The first is right on a public catalogue. The second, behind a login, is a
+    backlog item. Together they are one request, from anyone, that costs the
+    database three thousand queries - and every one of them returns 200, so
+    nothing in the logs looks like an attack.
+
+    The other half is the unbounded list: public, unpaginated, and therefore
+    the whole table in one request. That is not load, it is exfiltration.
+
+    The tools that look for this are DAST scanners; they need the service
+    running, reachable and holding enough rows for the cost to show. All of it
+    is in the source. Works on Django (DRF views) and FastAPI.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+    return _guard(_amplification, search_path=search_path)
 
 
 @mcp.tool()

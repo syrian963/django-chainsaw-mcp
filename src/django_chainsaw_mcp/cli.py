@@ -25,6 +25,7 @@ from typing import Any
 from . import baseline as _baseline
 from . import gitdiff as _gitdiff
 from . import sarif as _sarif
+from .amplification import amplification
 from .asyncio_blocking import blocking_in_async
 from .cascade import delete_impact
 from .fastapi_exposure import fastapi_exposure
@@ -667,6 +668,37 @@ def _cmd_sqla(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_amplification(args: argparse.Namespace) -> int:
+    report = amplification(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['open_endpoints_considered']} endpoint(s) reachable without "
+              "credentials were considered")
+        print()
+        if not report["finding_count"]:
+            print("None of them is expensive enough to be worth abusing.")
+        for f in report["findings"]:
+            cost = (f"~{f['estimated_queries']} queries" if f.get("estimated_queries")
+                    else ", ".join(f.get("relationships_per_row", [])) + " per row")
+            print(f"  {f['severity'].upper():<9} {f['endpoint']}  ({cost})")
+            if f.get("location"):
+                print(f"            {f['location']}")
+            print(f"            {f['why']}")
+            print(f"            fix: {f['fix']}")
+            print()
+        if report["checks_that_could_not_run"]:
+            print("Half of this question could not be answered:")
+            for problem in report["checks_that_could_not_run"]:
+                print(f"    {problem}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["critical_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1497,6 +1529,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any lazy relationship crossed per row")
     p.set_defaults(func=_cmd_sqla)
+
+    p = sub.add_parser("amplification",
+                       help="endpoints anyone can call that cost a great deal")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any critical amplification surface")
+    p.set_defaults(func=_cmd_amplification)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

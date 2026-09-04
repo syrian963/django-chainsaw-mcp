@@ -33,6 +33,29 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`amplification`**: endpoints that are both reachable without credentials
+  and expensive to answer. Two facts, each of which is somebody else's finding
+  and neither of which is wrong alone - `GET /orders` has no authentication,
+  which is right on a public catalogue, and `GET /orders` issues about 2852
+  queries, which behind a login is a backlog item. Together they are one
+  request, from anyone, that costs the database three thousand queries, and
+  every one of those requests returns 200 so nothing in the access log looks
+  like an attack. The other half is the unbounded list: public and unpaginated
+  is not load, it is the whole table in one request.
+
+  The tools that look for this are DAST scanners, which need the service
+  running, reachable and holding enough rows for the cost to show. Both halves
+  are in the source. Works on Django through DRF views and permission classes,
+  and on FastAPI through routes and SQLAlchemy relationships.
+
+  Severity separates the two: critical for 1000+ queries or unpaginated **and**
+  expensive, high for the rest. An earlier version made every unpaginated
+  public list critical and produced thirteen criticals on the demo project, one
+  costing 2851 queries and eight costing one - a label everything wears says
+  nothing. If one of the two underlying checks cannot run that is reported
+  rather than returning an empty list, because an empty result and an
+  unanswerable question look identical and only one is good news.
+
 - **`sqlalchemy_nplusone`**: relationships SQLAlchemy loads one row at a time.
   Two shapes. The familiar one is a lazy relationship touched inside a loop,
   where the query and the access are usually far enough apart that neither line
