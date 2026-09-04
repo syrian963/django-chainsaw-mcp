@@ -60,28 +60,49 @@ def _indexed_fields(model: Any) -> set[str]:
     """Every field the database can seek on for this model."""
     indexed: set[str] = set()
 
+    def cover(field: Any) -> None:
+        # A ForeignKey is `date` in the model and `date_id` in a queryset, and
+        # both name the same indexed column. Recording only `field.name` meant
+        # every `filter(date_id=...)` in a codebase was reported as needing an
+        # index that Django had already created - on a real project that was
+        # four of the seven most-reported candidates.
+        indexed.add(field.name)
+        attname = getattr(field, "attname", None)
+        if attname:
+            indexed.add(attname)
+
     for field in model._meta.get_fields():
         if not getattr(field, "concrete", False):
             continue
         if getattr(field, "primary_key", False) or getattr(field, "unique", False):
-            indexed.add(field.name)
+            cover(field)
         if getattr(field, "db_index", False):
-            indexed.add(field.name)
+            cover(field)
         # A ForeignKey gets an index unless it is explicitly turned off.
         if field.is_relation and field.many_to_one and getattr(field, "db_index", True):
-            indexed.add(field.name)
+            cover(field)
+
+    by_name = {f.name: f for f in model._meta.get_fields() if getattr(f, "concrete", False)}
+
+    def cover_name(name: str) -> None:
+        name = name.lstrip("-")
+        indexed.add(name)
+        field = by_name.get(name)
+        attname = getattr(field, "attname", None) if field is not None else None
+        if attname:
+            indexed.add(attname)
 
     meta = model._meta
     for index in getattr(meta, "indexes", []):
         for name in getattr(index, "fields", []):
-            indexed.add(name.lstrip("-"))
+            cover_name(name)
     for constraint in getattr(meta, "constraints", []):
         for name in getattr(constraint, "fields", []) or []:
-            indexed.add(name.lstrip("-"))
+            cover_name(name)
     for group in getattr(meta, "unique_together", ()) or ():
         # Only the leading column of a composite index is seekable on its own.
         if group:
-            indexed.add(group[0])
+            cover_name(group[0])
     for group in getattr(meta, "index_together", ()) or ():
         if group:
             indexed.add(group[0])

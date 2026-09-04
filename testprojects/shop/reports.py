@@ -67,3 +67,13 @@ def category_by_name(name):
 def orders_across_relation(customer):
     # A traversal belongs to the other table and is skipped here.
     return OrderLine.objects.filter(order__customer=customer)
+
+
+def products_in_category_id(category_id):
+    """Filtering by the FK column, which Django already indexed.
+
+    `category` and `category_id` name the same indexed column, so reporting
+    this as a missing index would send somebody to add one that exists.
+    Product has no path to the tenant root, so this is only an index case.
+    """
+    return Product.objects.filter(category_id=category_id)

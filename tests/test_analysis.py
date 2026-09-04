@@ -889,3 +889,17 @@ def test_include_with_only_gets_no_context_from_its_caller():
     # nothing and reporting them would be a fabrication.
     results, _ = _scan()
     assert "render_order_variable.html" not in results
+
+
+def test_a_foreign_key_column_is_not_reported_as_needing_an_index():
+    # `order` and `order_id` name the same column, and Django indexes every FK
+    # by default. Reporting filter(order_id=...) sends somebody to add an index
+    # that already exists; on a real project this was four of the seven
+    # most-reported candidates.
+    from django_chainsaw_mcp.indexes import missing_indexes
+
+    reported = {(f["model"], f["field"]) for f in missing_indexes()["findings"]}
+    assert ("shop.Product", "category_id") not in reported
+    assert ("shop.Product", "category") not in reported
+    # and a genuinely unindexed column still is
+    assert ("shop.Product", "name") in reported
