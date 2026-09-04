@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Run every suite. Exits non-zero if any of them fails.
+cd "$(dirname "$0")" || exit 2
+
+# uv installs to ~/.local/bin, which a non-interactive shell does not pick up.
+export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null || { echo "uv not found on PATH"; exit 2; }
+
+fails=0
+
+suite() {
+  local label="$1"; shift
+  printf '%-34s ' "$label"
+  if "$@" >/tmp/chainsaw_suite.log 2>&1; then
+    printf 'OK\n'
+  else
+    printf 'FAIL\n'
+    sed -n '$p' /tmp/chainsaw_suite.log | sed 's/^/      /'
+    fails=$((fails + 1))
+  fi
+}
+
+suite "smoke_test.py"    uv run python smoke_test.py
+suite "analysis_test.py" uv run python analysis_test.py
+suite "client_test.py"   uv run python client_test.py
+suite "exitcheck.sh"     bash exitcheck.sh
+
+echo
+if [ "$fails" -gt 0 ]; then
+  echo "$fails Suite(s) fehlgeschlagen"
+  exit 1
+fi
+echo "alle Suiten gruen"

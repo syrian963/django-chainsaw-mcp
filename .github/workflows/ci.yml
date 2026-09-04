@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Introspection functions
+        run: uv run python smoke_test.py
+
+      - name: Analysis tools
+        run: uv run python analysis_test.py
+
+      - name: Server over the real MCP transport
+        run: uv run python client_test.py
+
+      - name: CLI exit codes
+        run: bash exitcheck.sh
+
+  dogfood:
+    # The analyser run against its own demo project, which is the closest
+    # thing to a real target this repository has.
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_CHAINSAW_PROJECT_PATH: testprojects
+      DJANGO_CHAINSAW_SETTINGS_MODULE: demoshop.settings
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - name: Model graph
+        run: uv run django-chainsaw models --short
+
+      - name: Migration risk (reporting only)
+        run: uv run django-chainsaw migrations
+
+      # demoshop deliberately ships a blocking migration, so this is expected
+      # to exit 1. Anywhere else the step would simply be `django-chainsaw
+      # deploy-safety` with no negation.
+      - name: Deploy safety must flag the planted blocking migration
+        run: |
+          if uv run django-chainsaw deploy-safety; then
+            echo "expected exit 1, the demo project has an unsafe migration"
+            exit 1
+          fi

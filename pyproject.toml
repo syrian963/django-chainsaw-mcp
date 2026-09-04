@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+django-chainsaw = "django_chainsaw_mcp.cli:main"
 django-chainsaw-mcp = "django_chainsaw_mcp.server:main"
 
 [build-system]

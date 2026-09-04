@@ -22,6 +22,7 @@ from .django_env import DjangoBootError, ensure_django
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
 from .nplusone import analyse_template as _analyse_template
+from .scan import scan_templates as _scan_templates
 
 mcp = MCPServer("django-chainsaw")
 
@@ -104,6 +105,31 @@ def find_n_plus_one(template_path: str, root_models: dict[str, str]) -> dict[str
             {"orders": "shop.Order"}. Loop variables inherit from these.
     """
     return _guard(_analyse_template, template_path=template_path, root_models=root_models)
+
+
+@mcp.tool()
+def scan_templates(
+    template_root: str | None = None,
+    project_root: str | None = None,
+    root_models: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run the N+1 analysis over every template in a directory.
+
+    find_n_plus_one needs a context map per template. This resolves it instead
+    from class-based views that declare template_name together with model or
+    queryset, so a whole project can be scanned without typing anything.
+
+    Args:
+        template_root: template directory. Defaults to the project path.
+        project_root: where to look for views. Defaults to the project path.
+        root_models: context applied to every template, for names no view supplies.
+    """
+    return _guard(
+        _scan_templates,
+        template_root=template_root,
+        project_root=project_root,
+        root_models=root_models,
+    )
 
 
 @mcp.tool()

@@ -1,82 +1,98 @@
 # django-chainsaw-mcp
 
-An MCP server that **analyses** a Django project, not just describes it.
+An MCP server and CLI that **analyses** a Django project rather than describing
+it.
 
-There are already several Django MCP servers. They answer *what exists*: list
-the models, dump the schema, run the ORM, read the settings. None of the ones I
+Several Django MCP servers already exist. They answer *what exists*: list the
+models, dump the schema, run the ORM, read the settings. None of the ones I
 looked at answer *what will hurt*:
 
 - what a delete actually takes with it,
 - where the N+1 queries are,
 - which pending migration stops writes or breaks the code that is still running
-  during a rolling deploy.
+  during a rolling deploy,
+- and whether a destructive migration is safe to ship **yet**.
 
-That is the gap this fills. Everything is read-only and most of it never touches
-the database.
+Everything is read-only, and most of it never touches the database.
+
+## Two front ends, one analysis layer
+
+| | For |
+| --- | --- |
+| **MCP server** | asking questions while working, from Claude Code or any MCP client |
+| **`django-chainsaw` CLI** | the same checks with an exit code, so CI can gate on them |
 
 ## Tools
 
-| Tool | What it answers |
+| Tool | Answers |
 | --- | --- |
-| `project_info` | Does the target project load at all? Django version, settings module, installed apps, database engines. Run this first when something is broken. |
+| `project_info` | Does the target project load at all? Run this first when something is broken. |
 | `list_models` | Every model with fields, relation kind, direction and `on_delete`. |
-| `delete_impact` | Delete one row of this model: which models lose rows through CASCADE, which `PROTECT` relations block it, which fields get nulled. Follows the graph transitively. |
-| `find_n_plus_one` | Relation traversals in a template that each cost a query, with the `select_related` / `prefetch_related` that would fix them. |
-| `migration_risk` | Pending migrations rated by what they do to a live database: blocks writes, rewrites the table, or breaks the running code mid-deploy. |
-| `deploy_safety` | **Is this destructive migration safe to ship yet?** Cross-references what a migration removes against the code that still uses it, with file and line numbers. |
+| `delete_impact` | Delete one row: what cascades, what blocks, what gets nulled. Transitive. |
+| `find_n_plus_one` | Relation traversals in a template that each cost a query, and the fix. |
+| `scan_templates` | The same across a directory, resolving context from views. |
+| `migration_risk` | Migrations rated: blocks writes, rewrites the table, breaks running code. |
+| `deploy_safety` | **Is this destructive migration safe to ship yet?** |
 
-## `deploy_safety`, and why it is different from a linter
+Plus the resource `django://models`. Stable addressable data belongs in a
+resource; actions belong in tools.
 
-`django-migration-linter` classifies an operation in isolation: `RemoveField` is
-backward incompatible, always. That is true, and repeated often enough it stops
-being read, because the warning fires just as loudly for a field nobody has
-touched in two years as for one half the codebase reads.
+Full reference: [`docs/tools.md`](docs/tools.md).
 
-The question that actually decides a deploy is different: **has the code caught
-up yet?** During a rolling deploy the old pods keep serving while the new schema
-is already live. So this looks at both sides:
+## The one worth reading about
+
+`django-migration-linter` says `RemoveField` is backward incompatible. Always.
+Repeated often enough that stops being read.
+
+`deploy_safety` asks the question that actually decides the deploy: **has the
+code caught up yet?**
 
 ```
 BLOCKING shop.0002_remove_product_legacy_code  RemoveField 'legacy_code'
-     shop/services.py:17  [string field name]   Product.objects.values("id", "sku", "legacy_code")
-     shop/services.py:22  [keyword argument]    Product.objects.filter(legacy_code__startswith=code)
-     shop/services.py:27  [attribute access]    f"{product.sku} / {product.legacy_code}"
-     shop/services.py:32  [keyword argument]    Product(sku=sku, legacy_code="")
+     shop/services.py:17  [string field name]  values("id", "sku", "legacy_code")
+     shop/services.py:22  [keyword argument]   filter(legacy_code__startswith=code)
+     shop/services.py:27  [attribute access]   f"{product.sku} / {product.legacy_code}"
+     shop/services.py:32  [keyword argument]   Product(sku=sku, legacy_code="")
 ```
 
-and, just as importantly, the other verdict:
+and the other verdict, which is the point:
 
 ```
 CLEAR    shop.0002_remove_product_legacy_code  RemoveField 'legacy_code'
          no remaining reference found outside migrations
 ```
 
-**Being able to say "this one is fine" is the point.** A tool that calls
-everything dangerous gets ignored.
+Python is parsed with the AST, so comments and docstrings cannot produce a hit.
+Why and how: [`docs/deploy-safety.md`](docs/deploy-safety.md).
 
-Python files are parsed with the **AST**, not searched as text, so comments,
-docstrings and unrelated words cannot produce a hit; it finds attribute access,
-string field names in `values()` / `only()`, keyword arguments and ORM lookups.
-Templates fall back to patterns. Migrations from apps outside the project are
-skipped by default: `django.contrib` field names like `name` are too generic to
-match on and were the first thing to produce false positives.
+## Quick start
 
-## Resource
+```bash
+uv sync
+```
 
-`django://models` returns the full model graph as JSON.
-
-Stable, addressable data belongs in a resource; actions and parameterised
-queries belong in tools. Most MCP servers put everything in tools.
-
-## Configuration
+Point it at a project with two environment variables:
 
 | Variable | Example |
 | --- | --- |
-| `DJANGO_CHAINSAW_PROJECT_PATH` | `/path/to/project` (the directory the settings module is importable from) |
+| `DJANGO_CHAINSAW_PROJECT_PATH` | `/path/to/project` |
 | `DJANGO_CHAINSAW_SETTINGS_MODULE` | `myproject.settings` |
 
-Django must be importable from the interpreter that runs the server, along with
-whatever the target project's settings import.
+Django must be importable from the interpreter that runs it, along with whatever
+the target project's settings import.
+
+### As a CLI
+
+```bash
+django-chainsaw deploy-safety          # exit 1 if a migration is unsafe
+django-chainsaw n+1 --max-high 12      # exit 1 above the budget
+django-chainsaw delete-impact shop.Customer
+django-chainsaw --json models | jq .
+```
+
+Exit codes and a CI example: [`docs/cli.md`](docs/cli.md).
+
+### As an MCP server
 
 ```bash
 claude mcp add django-chainsaw --scope local \
@@ -85,85 +101,68 @@ claude mcp add django-chainsaw --scope local \
   -- uv run --directory /path/to/django-chainsaw-mcp python -m django_chainsaw_mcp.server
 ```
 
-## What the analysis does and does not know
+## What the analysis does not know
 
-Being wrong quietly is worse than being incomplete loudly, so each tool says
-what it cannot see.
+Nothing here executes the target project or reads its data, which buys safety
+and speed and costs certainty. Every tool states its own blind spots in its
+output rather than hiding them:
 
-- **`delete_impact`** reads `on_delete` across the graph. It does not count rows
-  and does not run custom `delete()` overrides or `pre_delete` / `post_delete`
-  signals, which can delete more than the graph implies.
-- **`find_n_plus_one`** reports **candidates**. It reads the template and the
-  model graph, not the view. If the queryset already prefetches that path there
-  is no extra query. Traversals inside a loop are `high`, outside a loop `low`.
-- **`migration_risk`** reads migration operations. It does not know your row
-  counts, your PostgreSQL version or your deploy strategy, all of which change
-  how bad a given operation really is. `django-migration-linter` covers similar
-  ground as a standalone linter; this is the same idea reachable from an
-  assistant, plus the deploy-ordering problem.
+- `delete_impact` does not run signals or custom `delete()` overrides.
+- `find_n_plus_one` reports **candidates**; it reads the template and the model
+  graph, not the queryset in the view.
+- `migration_risk` does not know row counts, PostgreSQL version, or deploy
+  strategy.
+- `deploy_safety` cannot see `getattr(obj, name)`, runtime SQL, or another
+  repository. `clear` means nothing was found here.
 
-## One process, one project
+**A confident wrong answer is worse than an incomplete one.** In this kind of
+tooling the failure mode is not a crash, it is a plausible sentence that sends
+someone in the wrong direction.
 
-`django.setup()` mutates global state and cannot be undone, so a server instance
-stays bound to the first project it loads. Asking it to switch raises a clear
-error instead of failing confusingly later. Run a second instance for a second
-project.
+## Documentation
 
-## Why `list_models` was built first
-
-Four of the five tools need the same thing: a populated Django app registry
-inside a process that is not the Django project. That bootstrap is the actual
-work; everything after it is ordinary querying.
-
-`list_models` is the smallest tool that proves both halves work, the MCP
-transport and the Django boot. Starting with `find_n_plus_one` would have meant
-debugging three unknowns at once.
+| | |
+| --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
+| [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
+| [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |
+| [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
+| [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |
 
 ## Development
 
 ```bash
-uv sync
-uv run python smoke_test.py      # calls the introspection functions directly
-uv run python analysis_test.py   # the three analysis tools, with assertions
-uv run python client_test.py     # drives the server over the real MCP transport
+uv run python smoke_test.py      # introspection, called directly
+uv run python analysis_test.py   # the analysis tools, with assertions
+uv run python client_test.py     # the server over the real MCP transport
+bash exitcheck.sh                # CLI exit codes
 ```
 
-`testprojects/` holds a throwaway Django project with deliberately
-relation-heavy models (self-referencing FK, one-to-one, many-to-many, several
-reverse accessors) and a template written the way a slow page is written.
+`client_test.py` is the one that counts: it starts the server as a separate
+process and speaks stdio to it. The others prove nothing about the protocol.
 
-## Three bugs worth keeping in the README
+`testprojects/` is a throwaway Django project shaped to expose bugs: a
+self-referencing FK, a `PROTECT` relation, a nested-loop template, and a
+migration that removes a field four other places still use.
 
-Each of these ran without raising anything. That is the point: the failure mode
-in this kind of tooling is not a crash, it is a confident wrong answer.
+## One process, one project
 
-**1. Reverse relations reported as `Unknown`.** The cardinality check tested
-`many_to_many`, `many_to_one` and `one_to_one` but not `one_to_many`. Every
-reverse accessor lost its cardinality, which is exactly the half that matters,
-because reverse relations are where N+1 queries come from.
+`django.setup()` mutates global state and cannot be undone, so a server instance
+stays bound to the first project it loads and says so when asked to switch. Run
+a second instance for a second project.
 
-**2. `delete_impact` found nothing at all.** `on_delete` lives on
-`field.remote_field`, not on the field. `getattr(field, "on_delete", None)`
-returned `None` silently, every relation classified as `UNKNOWN`, and the tool
-cheerfully reported that deleting a customer had no consequences.
+## Six bugs, all of which ran without raising
 
-**3. Nested loops were invisible.** Loop variables were bound to the *string*
-they iterated, so `{% for line in order.lines.all %}` left `line` unresolvable
-and everything inside that loop went unreported. Loop variables now carry the
-resolved element model, which is also what makes `prefetch_related('lines')`
-show up.
+Kept in [`CHANGELOG.md`](CHANGELOG.md) rather than tidied away. Static analysis
+fails by being confidently wrong, not by crashing, and every one of these
+produced perfectly reasonable-looking output:
 
-**4. `deploy_safety` matched a docstring and every `name` in the project.** The
-first version was a text search. It reported `contenttypes.0002` removing a
-field called `name` as blocking, with hits in unrelated models, and counted a
-sentence in a module docstring as a live reference. Fixed by parsing Python with
-the AST and by only analysing migrations from apps inside the project.
+1. Reverse relations lost their cardinality: the `one_to_many` case was missing.
+2. `delete_impact` returned nothing: `on_delete` is on `field.remote_field`.
+3. Nested loops were invisible: loop variables were bound to strings, not models.
+4. `deploy_safety` matched docstrings and every `name` in the project.
+5. Narrowing the scan emptied the analysis instead of flipping the verdict.
+6. The package imported `server` eagerly and warned under `python -m`.
 
-**5. Narrowing the scan emptied the analysis instead of changing the verdict.**
-`search_path` was deciding two things at once: where to look for references, and
-which apps count as project apps. Pointing it at a subdirectory therefore
-excluded every app and returned nothing at all, rather than reporting the
-migration as clear. App ownership now comes from the project path; `search_path`
-only narrows the scan.
-
-`analysis_test.py` and `client_test.py` fail on all five.
+Each has an assertion that fails without the fix.
