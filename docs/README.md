@@ -36,6 +36,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`bypassed_effects`](bypass.md) | bulk writes that skip everything the save() chain promised |
 | [`race_conditions`](concurrency.md) | counters changed in Python and saved, and locks with no transaction |
 | [`open_endpoints`](open-endpoints.md) | sensitive fields on endpoints anybody can call |
+| [`unused_eager_loading`](overfetch.md) | joins and prefetches nothing in the response reads |
 
 ## Understanding it
 
@@ -72,6 +73,7 @@ Every check here answers a question with a consequence attached:
 | Which bulk writes skip the effects the model promised? | `bypassed_effects` |
 | Which counters lose updates under load? | `race_conditions` |
 | Which public endpoints return something sensitive? | `open_endpoints` |
+| Which joins does this pay for and never read? | `unused_eager_loading` |
 | Which datetimes break when the clock moves? | `datetime_audit` |
 | What does the API expose that nobody decided to? | `serializer_exposure` |
 | **All of the above about one model, and the risks only visible combined** | `explain_model` |

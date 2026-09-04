@@ -100,3 +100,58 @@ class PaginatedOrderViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Order.objects.select_related("customer").prefetch_related(
         "lines", "lines__product", "lines__product__category"
     )
+
+
+class OrderSummaryOnlySerializer(serializers.ModelSerializer):
+    """Reads nothing across a relation."""
+
+    class Meta:
+        model = Order
+        fields = ["id", "placed_at"]
+
+
+class OverFetchingOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """Two JOINs and three queries for fields nobody renders.
+
+    It looks like an optimisation. It became one: the field it was added for
+    was removed and the select_related stayed, because taking one out feels
+    riskier than leaving it in.
+    """
+
+    serializer_class = OrderSummaryOnlySerializer
+    queryset = Order.objects.select_related("customer").prefetch_related(
+        "lines__product__category"
+    )
+
+
+class WellTunedOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """Loads exactly what it renders, so nothing here is a finding."""
+
+    serializer_class = OrderDetailSerializer
+    queryset = Order.objects.select_related("customer").prefetch_related(
+        "lines", "lines__product", "lines__product__category"
+    )
+
+
+class MethodFieldOrderSerializer(serializers.ModelSerializer):
+    """A method field can read anything, including the relation below."""
+
+    customer_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = ["id", "customer_label"]
+
+    def get_customer_label(self, obj):
+        return obj.customer.name
+
+
+class OpaqueOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """The select_related IS used, inside a method field this cannot read.
+
+    Reporting it would be a destructive suggestion that puts the N+1 back, so
+    it is low confidence and hidden unless asked for.
+    """
+
+    serializer_class = MethodFieldOrderSerializer
+    queryset = Order.objects.select_related("customer")

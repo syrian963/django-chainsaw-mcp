@@ -183,6 +183,17 @@ Public endpoints whose serializer exposes a sensitive field (critical) or every
 field via `__all__`/`exclude` (medium). `--fail-on-findings` exits `1` on any
 critical. Also in the aggregate `check` as `open`.
 
+### `overfetch`
+
+```bash
+django-chainsaw overfetch [--include-low-confidence] [--fail-on-findings]
+```
+
+Relations the queryset loads and the serializer never reads. An unused
+`prefetch_related` is medium (a whole extra query), an unused `select_related`
+is low (a JOIN per row). `--fail-on-findings` exits `1` on any high-confidence
+one.
+
 ### `indexes`
 
 ```bash

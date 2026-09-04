@@ -903,3 +903,39 @@ def test_a_foreign_key_column_is_not_reported_as_needing_an_index():
     assert ("shop.Product", "category") not in reported
     # and a genuinely unindexed column still is
     assert ("shop.Product", "name") in reported
+
+
+def _overfetch(low=False):
+    from django_chainsaw_mcp.overfetch import unused_eager_loading
+
+    report = unused_eager_loading(include_low_confidence=low)
+    return {(f["view"].rsplit(".", 1)[-1], f["kind"], f["path"]): f for f in report["findings"]}
+
+
+def test_a_relation_loaded_and_never_read_is_reported():
+    found = _overfetch()
+    assert ("OverFetchingOrderViewSet", "select_related", "customer") in found
+    assert ("OverFetchingOrderViewSet", "prefetch_related", "lines__product__category") in found
+
+
+def test_a_queryset_that_loads_exactly_what_it_renders_is_silent():
+    # If this ever reports, the check is telling people to delete the
+    # prefetches that make the endpoint fast.
+    assert not [k for k in _overfetch() if k[0] == "WellTunedOrderViewSet"]
+
+
+def test_a_deeper_read_earns_a_shallower_prefetch():
+    # prefetch_related("lines") is earned by a read of lines__product, since
+    # the deeper path cannot be traversed without the shallower one.
+    assert ("WellTunedOrderViewSet", "prefetch_related", "lines") not in _overfetch()
+
+
+def test_a_method_field_makes_it_low_confidence_and_hidden():
+    # The select_related IS used, inside a method field this cannot read.
+    # Reporting it by default would put the N+1 back.
+    key = ("OpaqueOrderViewSet", "select_related", "customer")
+    assert key not in _overfetch()
+    low = _overfetch(low=True)
+    assert key in low
+    assert low[key]["confidence"] == "low"
+    assert "SerializerMethodField" in low[key]["unreadable_because"]

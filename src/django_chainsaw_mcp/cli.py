@@ -38,6 +38,7 @@ from .concurrency import race_conditions
 from .deploy_safety import deploy_safety
 from .exposure_auth import open_endpoints
 from .on_commit import escaping_side_effects
+from .overfetch import unused_eager_loading
 from .endpoint_cost import endpoint_cost
 from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
@@ -455,6 +456,38 @@ def _cmd_open(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["critical_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_overfetch(args: argparse.Namespace) -> int:
+    report = unused_eager_loading(include_low_confidence=args.include_low_confidence)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["rest_framework_installed"]:
+            print(report["note"])
+            return EXIT_OK
+        if not report["finding_count"]:
+            print(f"Nothing loaded and unread across {report['views_checked']} view(s).")
+        else:
+            print(f"{report['finding_count']} relation(s) loaded and never read")
+            print()
+            for f in report["findings"]:
+                flag = "" if f["confidence"] == "high" else f"  (low confidence: {', '.join(f['unreadable_because'])})"
+                print(f"  {f['severity'].upper():<6} {f['view']}{flag}")
+                print(f"         .{f['kind']}(\"{f['path']}\")")
+                print(f"         {f['why']}")
+                print(f"         reads: {', '.join(f['serializer_reads']) or 'no relation at all'}")
+                print(f"         fix: {f['fix']}")
+                print()
+        if report["views_with_runtime_paths"]:
+            print(f"{report['views_with_runtime_paths']} view(s) build their paths at runtime "
+                  "and were skipped.")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_confidence_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1225,6 +1258,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 if any open endpoint exposes a sensitive field")
     p.set_defaults(func=_cmd_open)
+
+    p = sub.add_parser("overfetch",
+                       help="select_related/prefetch_related the serializer never reads")
+    p.add_argument("--include-low-confidence", action="store_true",
+                   help="also report views with a method field or an overridden list/retrieve")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any high-confidence unused eager load")
+    p.set_defaults(func=_cmd_overfetch)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

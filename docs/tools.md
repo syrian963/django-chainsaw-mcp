@@ -424,6 +424,23 @@ Documented in [`open-endpoints.md`](open-endpoints.md).
 
 ---
 
+## `unused_eager_loading`
+
+`select_related` and `prefetch_related` the serializer never reads: the
+opposite direction from an N+1, and it costs on every request.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `include_low_confidence` | `false` | also report views with a `SerializerMethodField` or an overridden `list`/`retrieve`/`to_representation` |
+
+A queryset whose paths are built at runtime is skipped and counted, because
+calling a path unused when the list is incomplete is the one way this check
+could cause an N+1.
+
+Documented in [`overfetch.md`](overfetch.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

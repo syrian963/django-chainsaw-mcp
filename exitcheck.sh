@@ -43,6 +43,8 @@ expect 0 "n+1-serializer without gate"            $BIN n+1-serializer
 expect 0 "cost without gate"                      $BIN cost
 expect 0 "open without gate"                      $BIN open
 expect 1 "open --fail-on-findings"                $BIN open --fail-on-findings
+expect 0 "overfetch without gate"                 $BIN overfetch
+expect 1 "overfetch --fail-on-findings"           $BIN overfetch --fail-on-findings
 expect 0 "races without gate"                     $BIN races
 expect 1 "races --fail-on-findings"               $BIN races --fail-on-findings
 expect 0 "bypass without gate"                    $BIN bypass

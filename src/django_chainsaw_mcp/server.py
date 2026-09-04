@@ -36,6 +36,7 @@ from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
 from .explain import explain_model as _explain_model
+from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
@@ -295,6 +296,32 @@ def open_endpoints(include_unbounded: bool = True) -> dict[str, Any]:
             model today. The next migration decides what leaks.
     """
     return _guard(_open_endpoints, include_unbounded=include_unbounded)
+
+
+@mcp.tool()
+def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]:
+    """select_related and prefetch_related the serializer never reads.
+
+    Every tool in this space looks the other way: a relation the serializer
+    touches that the queryset did not prefetch, which is the N+1. This is the
+    opposite, and it costs on every request. An unused select_related is a
+    JOIN on every row; an unused prefetch_related is a whole extra query plus
+    the objects it returns.
+
+    It is invisible because it looks like an optimisation, and it usually was
+    one - the field it was added for was removed and nobody takes the line out,
+    because removing one feels riskier than leaving it in.
+
+    nplusone finds this at runtime by watching which loaded objects go
+    untouched, so it covers the paths the tests exercise. Both halves are in
+    the source: the queryset says what it loads, the serializer what it reads.
+
+    Args:
+        include_low_confidence: also report views whose serializer has a
+            SerializerMethodField or which override list/retrieve/
+            to_representation, where the relation may be read out of sight.
+    """
+    return _guard(_unused_eager_loading, include_low_confidence=include_low_confidence)
 
 
 @mcp.tool()
