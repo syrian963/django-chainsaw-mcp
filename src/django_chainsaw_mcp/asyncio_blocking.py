@@ -213,13 +213,36 @@ def blocking_in_async(
     async_seen = 0
     files_scanned = 0
 
+    # A project with no async functions has nothing for this check to say, and
+    # building a call graph over it is pure cost: on a 2000-file Django project
+    # with one async function that was 60 seconds to report nothing.
+    if found.async_functions == 0:
+        return {
+            "search_path": str(root),
+            "files_scanned": found.files_scanned,
+            "frameworks": dict(found.frameworks),
+            "async_functions_seen": 0,
+            "direct_count": 0,
+            "indirect_count": 0,
+            "finding_count": 0,
+            "direct": [],
+            "reached_through_a_call": [],
+            "note": (
+                "This project defines no async functions, so nothing can be "
+                "running on an event loop and there is nothing to report. The "
+                "call graph was not built, because it would have cost a great "
+                "deal to confirm an answer that was already known."
+            ),
+        }
+
     graph = callgraph.build(root) if follow_calls else None
 
     # Which project functions block, directly, so an async caller can be told.
     blocking_functions: dict[str, dict[str, Any]] = {}
     if graph is not None:
+        trees = _TreeCache(root)
         for fn in graph.functions.values():
-            node = _function_node(root, fn)
+            node = trees.function(fn)
             if node is None:
                 continue
             scan = _AsyncBodyScan()
@@ -337,16 +360,43 @@ def blocking_in_async(
     }
 
 
+class _TreeCache:
+    """One parse per file, and the definitions in it indexed by (name, line).
+
+    The blocking-function pass asked for one function at a time and re-parsed
+    the whole file for each. On a project with 11300 functions across two
+    thousand files that was 60 seconds spent to check a single async function.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._index: dict[str, dict[tuple[str, int], ast.AST] | None] = {}
+
+    def _file(self, relative: str) -> dict[tuple[str, int], ast.AST] | None:
+        if relative not in self._index:
+            try:
+                source = (self.root / relative).read_text(encoding="utf-8", errors="replace")
+                tree = ast.parse(source)
+            except (OSError, SyntaxError):
+                self._index[relative] = None
+                return None
+            self._index[relative] = {
+                (node.name, node.lineno): node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+        return self._index[relative]
+
+    def function(self, fn: Any) -> ast.AST | None:
+        index = self._file(fn.file)
+        if index is None:
+            return None
+        return index.get((fn.name, fn.line))
+
+
 def _function_node(root: Path, fn: Any) -> ast.AST | None:
-    try:
-        tree = ast.parse((root / fn.file).read_text(encoding="utf-8", errors="replace"))
-    except (OSError, SyntaxError):
-        return None
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name == fn.name and node.lineno == fn.line:
-                return node
-    return None
+    """Kept for callers outside the hot loop; the cache is what the loop uses."""
+    return _TreeCache(root).function(fn)
 
 
 def _qualname_for(graph: Any, relative: str, node: ast.AST) -> str | None:

@@ -1364,3 +1364,64 @@ def test_an_unrelated_object_of_the_same_name_is_not_matched_to_a_task():
     _, _, report = _celery()
     files = {f["file"] for f in report["instance_arguments"] + report["arity_mismatches"]}
     assert not [f for f in files if "notifications.py" in f], files
+
+
+def test_a_dispatch_inside_a_nested_function_is_counted_once():
+    # _CallScan used to descend into nested defs, which were then scanned
+    # again as their own scope. On a real project that reported 11 dispatches
+    # where the source has 10.
+    import ast
+    import io
+    from pathlib import Path
+
+    from django_chainsaw_mcp.celery_tasks import celery_arguments
+    from django_chainsaw_mcp.django_env import ensure_django
+
+    root = Path(ensure_django().project_path)
+    in_source = 0
+    for path in root.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr in {"delay", "apply_async", "delay_on_commit", "s", "si"}:
+                    in_source += 1
+
+    checked = celery_arguments()["dispatches_checked"]
+    assert checked <= in_source, f"{checked} dispatches counted, {in_source} exist"
+
+
+def test_an_empty_half_is_not_reported_as_a_clean_result():
+    # Zero findings is only good news when both halves had something to work
+    # with. This is the failure this check was written to avoid in other
+    # people's tools, so it must not commit it itself.
+    from django_chainsaw_mcp.amplification import amplification
+
+    report = amplification()
+    assert "sides_with_no_data" in report
+    assert "answerable" in report
+    # The demo project has both halves, so it is answerable.
+    assert report["answerable"] is True
+
+
+def test_the_async_check_does_not_build_a_call_graph_for_nothing():
+    # A project with no async functions has nothing to report, and building a
+    # graph over it cost 60 seconds on a real project to confirm that.
+    import time
+
+    from django_chainsaw_mcp.asyncio_blocking import blocking_in_async
+    from django_chainsaw_mcp.django_env import ensure_django
+
+    root = str(ensure_django().project_path) + "/demoshop"
+    start = time.perf_counter()
+    report = blocking_in_async(search_path=root)
+    elapsed = time.perf_counter() - start
+
+    assert report["async_functions_seen"] == 0
+    assert report["finding_count"] == 0
+    assert "no async functions" in report["note"]
+    assert elapsed < 2.0, f"took {elapsed:.1f}s to say there is no async code"

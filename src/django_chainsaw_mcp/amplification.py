@@ -126,12 +126,26 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
 
     findings: list[dict[str, Any]] = []
     problems: list[str] = []
+    # A half that ran and found nothing to work with is not the same as a
+    # half that found nothing wrong, and reporting zero findings without
+    # saying which one happened is the failure this check was built to avoid
+    # in other people's tools.
+    empty: list[str] = []
     considered = 0
 
     if profile.is_django:
         open_views, costs, django_problems = _django_side()
         problems.extend(django_problems)
         considered += len(open_views)
+        if not costs:
+            empty.append(
+                "no Django endpoint could be costed: endpoint_cost works from a "
+                "view's serializer_class and queryset, and none of this "
+                "project's views declare one, so the expensive half of the "
+                "question has no data"
+            )
+        if not open_views:
+            empty.append("no Django view was found to be reachable without a permission class")
 
         for label, info in sorted(open_views.items()):
             endpoint = costs.get(label)
@@ -189,6 +203,13 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
         routes, per_row, fastapi_problems = _fastapi_side(root)
         problems.extend(fastapi_problems)
         considered += len(routes)
+        if not per_row:
+            empty.append(
+                "no SQLAlchemy relationship was found to be crossed per row, so "
+                "the expensive half of the FastAPI question has no data"
+            )
+        if not routes:
+            empty.append("no FastAPI route was found without an authenticating dependency")
 
         for name, route in sorted(routes.items()):
             crossings = per_row.get(name) or []
@@ -227,6 +248,8 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
         "critical_count": sum(1 for f in findings if f["severity"] == "critical"),
         "findings": findings,
         "checks_that_could_not_run": problems,
+        "sides_with_no_data": empty,
+        "answerable": not empty or bool(findings),
         "note": (
             "Each half of this is somebody else's finding and neither is wrong "
             "alone: an endpoint with no authentication is correct on a public "
@@ -237,6 +260,10 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
             "The tools that look for this are DAST scanners: they need the "
             "service running, reachable, and holding enough rows for the cost "
             "to show. All of it is in the source.\n\n"
+            "A result of zero findings is only good news when both halves had "
+            "something to work with. When one of them did not, that is listed "
+            "under sides_with_no_data and the answer is 'could not look', not "
+            "'nothing to find'.\n\n"
             "The query estimate carries a stated assumption about how many "
             "child rows a parent has, so the absolute number is only as good as "
             "that assumption. The ratio is what survives it. An unpaginated "

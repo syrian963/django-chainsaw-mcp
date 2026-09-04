@@ -157,6 +157,14 @@ class _CallScan(ast.NodeVisitor):
         self.instances: dict[str, str] = {}
         self.calls: list[dict[str, Any]] = []
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        # A nested def is its own scope and is scanned as one, so descending
+        # into it here counted every dispatch inside it twice. On a real
+        # project that reported 11 dispatches where the source has 10.
+        return
+
+    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+
     def visit_Assign(self, node: ast.Assign) -> None:
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             model = self._instance_of(node.value)

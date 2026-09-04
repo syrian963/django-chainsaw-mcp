@@ -31,6 +31,27 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   check that has one, which tests the same gate with no exclusivity
   assumption.
 
+### Fixed
+
+- **The async check re-parsed the whole file once per function.** Looking up
+  one definition at a time meant 11300 parses of two thousand files on a real
+  project: 60 seconds to check a single async function. Each file is parsed
+  once now and its definitions indexed, which took that to 12 seconds, most of
+  it the call graph doing real work. The check also returns immediately when a
+  project defines no async functions at all, rather than building a graph to
+  confirm an answer that was already known.
+- **`celery_arguments` counted dispatches inside nested functions twice.**
+  `_CallScan` descended into a nested `def` which was then scanned again as its
+  own scope, so a real project reported 11 dispatches where the source has 10.
+  It is 9 of 10 now, the tenth being a task this project does not define.
+- **`amplification` reported an empty half as a clean result.** Zero findings
+  is only good news when both halves had something to work with; on a project
+  whose views declare no `serializer_class` the expensive half has no data at
+  all. That now comes back under `sides_with_no_data` with an `answerable`
+  flag, because "could not look" and "nothing to find" are different answers
+  and this is the exact failure the check was written to catch in other
+  people's tools.
+
 ### Added
 
 - **`celery_arguments`**: model instances handed to Celery tasks, and
