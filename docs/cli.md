@@ -272,6 +272,15 @@ django-chainsaw explain app_label.ModelName
 Everything about one model, including the risks only visible when its fields,
 relations and migrations are read together.
 
+### `celery`
+
+```bash
+django-chainsaw celery [--search-path DIR] [--fail-on-findings]
+```
+
+Model instances handed to Celery tasks, and dispatches whose argument count
+cannot match the task. Also in the aggregate `check` as `celery`.
+
 ### `indexes`
 
 ```bash

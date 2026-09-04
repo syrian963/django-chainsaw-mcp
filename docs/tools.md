@@ -575,6 +575,26 @@ Documented in [`fixes.md`](fixes.md).
 
 ---
 
+## `celery_arguments`
+
+Model instances handed to Celery tasks, and dispatches whose argument count
+cannot match the task.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+The worker receives whatever the serialiser made of the instance, rehydrated
+later on another machine, so the row may have changed, the whole object
+crosses the broker, and under the JSON serialiser it may not encode at all.
+
+A dispatch is only checked when the name resolves to a task this project
+defines, through the calling file's own imports.
+
+Documented in [`celery.md`](celery.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

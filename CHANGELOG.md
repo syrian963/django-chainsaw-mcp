@@ -33,6 +33,26 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`celery_arguments`**: model instances handed to Celery tasks, and
+  dispatches whose argument count cannot match the task. The worker does not
+  receive the instance - it receives whatever the serialiser made of it,
+  rehydrated later on another machine, so the row may have changed in between,
+  the whole object crosses the broker, and under the JSON serialiser, the
+  default since Celery 4, it may not encode at all. Passing the primary key is
+  the documented fix and nothing checks it: `flake8-pie`'s Celery lints cover
+  task names, crontab arguments and expirations, none of which look at what is
+  passed.
+
+  Arity is reported too. Celery's `strict_typing` catches that at call time,
+  which for a nightly job or an error branch means in production, months
+  later. A `bind=True` task takes `self` from Celery and that is accounted for.
+
+  A dispatch is only checked when the name resolves to a task this project
+  defines, through the calling file's own imports. Matching on the bare name
+  was the first version and this repository's own fixtures broke it: a plain
+  object called `send_confirmation` in one module and a task of the same name
+  in another produced eighteen findings that were not real.
+
 - **`docs_check.sh`**: the documentation is checked the way the code is. It
   fails if a tool has no line in the README, a subcommand has no section in the
   CLI reference, an aggregate check name cannot be looked up anywhere, or a

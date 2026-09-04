@@ -28,6 +28,7 @@ from . import sarif as _sarif
 from .amplification import amplification
 from .asyncio_blocking import blocking_in_async
 from .cascade import delete_impact
+from .celery_tasks import celery_arguments
 from .fastapi_exposure import fastapi_exposure
 from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
 from .serializer_nplusone import serializer_nplusone
@@ -699,6 +700,36 @@ def _cmd_amplification(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["critical_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_celery(args: argparse.Namespace) -> int:
+    report = celery_arguments(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['tasks_found']} task(s), {report['dispatches_checked']} dispatch(es) "
+              "resolved to one of them")
+        print()
+        if not report["finding_count"]:
+            print("Every dispatch passes what its task asked for.")
+        for f in report["instance_arguments"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  {f['task']}({f['parameter']})")
+            print(f"         {f['code']}")
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        for f in report["arity_mismatches"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  {f['task']} given {f['given']}, "
+                  f"expects {f['expects']}")
+            print(f"         {f['code']}")
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1536,6 +1567,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any critical amplification surface")
     p.set_defaults(func=_cmd_amplification)
+
+    p = sub.add_parser("celery",
+                       help="model instances handed to tasks, and wrong argument counts")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any task given the wrong thing")
+    p.set_defaults(func=_cmd_celery)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

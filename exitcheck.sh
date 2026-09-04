@@ -49,6 +49,8 @@ expect 0 "open without gate"                      $BIN open
 expect 1 "open --fail-on-findings"                $BIN open --fail-on-findings
 expect 0 "overfetch without gate"                 $BIN overfetch
 expect 1 "overfetch --fail-on-findings"           $BIN overfetch --fail-on-findings
+expect 0 "celery without gate"                    $BIN celery
+expect 1 "celery --fail-on-findings"              $BIN celery --fail-on-findings
 expect 0 "money without gate"                     $BIN money
 expect 1 "money --fail-on-findings"               $BIN money --fail-on-findings
 expect 0 "races without gate"                     $BIN races

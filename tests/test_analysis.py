@@ -1312,3 +1312,55 @@ def test_half_an_answer_is_reported_as_half_an_answer():
     _, report = _amplification()
     assert "checks_that_could_not_run" in report
     assert report["checks_that_could_not_run"] == []
+
+
+def _celery():
+    from django_chainsaw_mcp.celery_tasks import celery_arguments
+
+    report = celery_arguments()
+    instances = {(f["task"], f["model"], f["line"]) for f in report["instance_arguments"]}
+    arity = {(f["task"], f["given"]) for f in report["arity_mismatches"]}
+    return instances, arity, report
+
+
+def test_a_model_instance_handed_to_a_task_is_reported():
+    instances, _, _ = _celery()
+    models = {(task, model) for task, model, _ in instances}
+    assert ("send_confirmation", "Order") in models
+
+
+def test_an_instance_from_get_object_or_404_counts_too():
+    # It is a plain name call rather than an attribute one, which is how it
+    # was missed at first.
+    instances, _, _ = _celery()
+    models = {(task, model) for task, model, _ in instances}
+    assert ("send_confirmation", "Customer") in models
+
+
+def test_a_dispatch_with_the_wrong_argument_count_is_reported():
+    _, arity, _ = _celery()
+    assert ("reconcile", 1) in arity
+    assert ("reconcile", 3) in arity
+
+
+def test_a_bound_task_does_not_count_self_against_the_caller():
+    # @shared_task(bind=True) takes self from Celery, never from the call.
+    _, arity, _ = _celery()
+    assert not [a for a in arity if a[0] == "retryable"]
+
+
+def test_passing_the_identifier_and_using_keywords_are_both_silent():
+    instances, arity, report = _celery()
+    # dispatch_correctly passes order.pk
+    assert report["instance_argument_count"] == 3, report["instance_arguments"]
+    # dispatch_by_keyword uses kwargs, which arity cannot judge
+    assert not [a for a in arity if a[0] == "reconcile" and a[1] == 0]
+
+
+def test_an_unrelated_object_of_the_same_name_is_not_matched_to_a_task():
+    # notifications.py has a plain object called send_confirmation. Matching
+    # tasks by bare name reported every call to it against the real task's
+    # signature - eighteen findings that were not real.
+    _, _, report = _celery()
+    files = {f["file"] for f in report["instance_arguments"] + report["arity_mismatches"]}
+    assert not [f for f in files if "notifications.py" in f], files

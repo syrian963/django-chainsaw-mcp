@@ -40,6 +40,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`open_endpoints`](open-endpoints.md) | sensitive fields on endpoints anybody can call |
 | [`unused_eager_loading`](overfetch.md) | joins and prefetches nothing in the response reads |
 | [`money_precision`](money.md) | decimal amounts that stop being exact |
+| [`celery_arguments`](celery.md) | model instances handed to tasks, and wrong argument counts |
 | [`blocking_in_async`](async-blocking.md) | synchronous calls that stop the whole event loop |
 | [`fastapi_exposure`](fastapi.md) | endpoints that serialise more than they declare |
 | [`sqlalchemy_nplusone`](sqlalchemy.md) | relationships loaded one row at a time |
@@ -82,6 +83,7 @@ Every check here answers a question with a consequence attached:
 | Which public endpoints return something sensitive? | `open_endpoints` |
 | Which joins does this pay for and never read? | `unused_eager_loading` |
 | Where does money stop being exact? | `money_precision` |
+| What does the worker actually receive? | `celery_arguments` |
 | Which call stops the event loop for every request? | `blocking_in_async` |
 | Which endpoint returns every column it was handed? | `fastapi_exposure` |
 | Which relationship loads one row at a time? | `sqlalchemy_nplusone` |

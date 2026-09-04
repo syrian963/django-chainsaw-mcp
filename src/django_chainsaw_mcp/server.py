@@ -22,6 +22,7 @@ from mcp.server.mcpserver import MCPServer
 from .amplification import amplification as _amplification
 from .asyncio_blocking import blocking_in_async as _blocking_in_async
 from .cascade import delete_impact as _delete_impact
+from .celery_tasks import celery_arguments as _celery_arguments
 from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
 from .api_contract import contract as _contract
 from .api_contract import diff as _contract_diff
@@ -502,6 +503,36 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
         search_path: directory to scan. Defaults to the configured project.
     """
     return _guard(_amplification, search_path=search_path)
+
+
+@mcp.tool()
+def celery_arguments(search_path: str | None = None) -> dict[str, Any]:
+    """Model instances handed to Celery tasks, and calls whose arity is wrong.
+
+        order = Order.objects.get(pk=pk)
+        send_confirmation.delay(order)
+
+    The worker does not get that order. It gets whatever the serialiser made
+    of it, rehydrated later on another machine: the row may have changed in
+    between, the whole object crosses the broker, and under the JSON
+    serialiser - the default since Celery 4 - it may not encode at all. Pass
+    the primary key and let the task load it.
+
+    Also reports a dispatch whose argument count cannot match the task.
+    Celery's strict_typing catches that at call time, which for a nightly job
+    or an error branch means in production, months later.
+
+    flake8-pie has Celery lints for names, crontab arguments and expirations.
+    None of them look at what is passed.
+
+    A dispatch is only checked when the name resolves to a task this project
+    defines, through the file's own imports - matching on the bare name
+    reported unrelated objects of the same name against the task's signature.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+    return _guard(_celery_arguments, search_path=search_path)
 
 
 @mcp.tool()

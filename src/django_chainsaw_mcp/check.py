@@ -31,6 +31,7 @@ from .indexes import missing_indexes
 from .bypass import bypassed_effects
 from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
+from .celery_tasks import celery_arguments
 from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
@@ -279,6 +280,26 @@ def _from_sqla(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_celery(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "celery", "high",
+            f"{f['task']} is handed a {f['model']} where {f['parameter']} belongs",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("instance_arguments", [])
+    ]
+    out += [
+        _finding(
+            "celery", "high",
+            f"{f['task']} is given {f['given']} argument(s) and expects {f['expects']}",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("arity_mismatches", [])
+    ]
+    return out
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for entry in report.get("migrations", []):
@@ -309,6 +330,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "bypass": (bypassed_effects, lambda o: {}, _from_bypass),
     "races": (race_conditions, lambda o: {}, _from_races),
     "money": (money_precision, lambda o: {}, _from_money),
+    "celery": (celery_arguments, lambda o: {}, _from_celery),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
     "async": (blocking_in_async, lambda o: {}, _from_async),
@@ -332,6 +354,7 @@ _REQUIRES: dict[str, str] = {
     "bypass": "django",
     "races": "django",
     "money": "django",
+    "celery": "django",
     "open": "django",
     "migrations": "django",
     "async": "any",
