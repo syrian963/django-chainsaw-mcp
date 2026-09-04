@@ -106,9 +106,12 @@ def _walk(
     scope: dict[str, Any],
     in_loop: bool,
     findings: list[dict[str, Any]],
+    depth: int = 0,
+    seen: frozenset[str] = frozenset(),
 ) -> None:
     from django.template.base import VariableNode
     from django.template.defaulttags import ForNode
+    from django.template.loader_tags import IncludeNode
 
     for node in nodelist:
         if isinstance(node, VariableNode):
@@ -143,13 +146,109 @@ def _walk(
             for child_list in node.child_nodelists:
                 child = getattr(node, child_list, None)
                 if child:
-                    _walk(child, inner, True, findings)
+                    _walk(child, inner, True, findings, depth, seen)
+            continue
+
+        if isinstance(node, IncludeNode):
+            # A partial rendered inside a loop is the N+1 nobody sees: the
+            # loop is in one file and the relation traversal is in another,
+            # and neither file is suspicious on its own.
+            _walk_include(node, scope, in_loop, findings, depth, seen)
             continue
 
         for child_list in getattr(node, "child_nodelists", ()):
             child = getattr(node, child_list, None)
             if child:
-                _walk(child, scope, in_loop, findings)
+                _walk(child, scope, in_loop, findings, depth, seen)
+
+
+_MAX_INCLUDE_DEPTH = 5
+
+# Directories to try when the configured engine cannot find an included
+# template. A project with a misconfigured or empty TEMPLATES setting would
+# otherwise follow no includes at all and say nothing about it.
+_SEARCH_DIRS: list[Path] = []
+
+
+def set_include_search_dirs(dirs: list[Path]) -> None:
+    """Where to look for an included template the engine could not resolve."""
+    global _SEARCH_DIRS
+    _SEARCH_DIRS = [d for d in dirs if d.is_dir()]
+
+
+def _load_included(name: str) -> Any:
+    try:
+        return _project_engine().get_template(name)
+    except Exception:  # noqa: BLE001 - fall through to the search path
+        pass
+    for directory in _SEARCH_DIRS:
+        candidate = directory / name
+        if candidate.is_file():
+            try:
+                return _project_engine().from_string(
+                    candidate.read_text(encoding="utf-8", errors="replace")
+                )
+            except Exception:  # noqa: BLE001 - an unparsable partial is not a failure
+                return None
+    return None
+
+
+def _walk_include(
+    node: Any,
+    scope: dict[str, Any],
+    in_loop: bool,
+    findings: list[dict[str, Any]],
+    depth: int,
+    seen: frozenset[str],
+) -> None:
+    """Follow `{% include "partial.html" %}` with the caller's context.
+
+    Only a literal template name can be followed; `{% include chosen %}`
+    picks its target at runtime. `{% include ... only %}` gets an empty
+    scope, because that is exactly what `only` means, and `with x=y` rebinds
+    what it names.
+    """
+    from django.template.base import Variable, VariableDoesNotExist
+
+    if depth >= _MAX_INCLUDE_DEPTH:
+        return
+    try:
+        name = node.template.var
+    except AttributeError:
+        return
+    if not isinstance(name, str):
+        # A FilterExpression whose var is a Variable resolves at runtime.
+        return
+    if name in seen:
+        # A partial that includes itself, directly or in a ring.
+        return
+
+    inner = {} if getattr(node, "isolated_context", False) else dict(scope)
+    for key, value in (getattr(node, "extra_context", None) or {}).items():
+        source = getattr(value, "var", None)
+        if isinstance(source, Variable):
+            parts = _strip_manager_call(str(source).split("."))
+            if len(parts) == 1 and parts[0] in scope:
+                inner[key] = scope[parts[0]]
+            elif len(parts) >= 2 and parts[0] in scope:
+                chain = _resolve(scope[parts[0]], parts[1:])
+                if chain:
+                    inner[key] = chain["ends_on"]
+
+    if not inner:
+        return
+
+    included = _load_included(name)
+    if included is None:
+        return
+
+    nodelist = getattr(included, "nodelist", None)
+    if nodelist is None:
+        nodelist = getattr(getattr(included, "template", None), "nodelist", None)
+    if nodelist is None:
+        return
+
+    _walk(nodelist, inner, in_loop, findings, depth + 1, seen | {name})
 
 
 def _project_engine() -> Any:

@@ -842,3 +842,50 @@ def test_attribution_is_reported_as_possible_when_a_view_names_a_serializer():
     # and with attribution working, unserved is a real answer rather than
     # every serializer in the project
     assert len(captured["unserved"]) < captured["serializer_count"]
+
+
+def _scan():
+    from django_chainsaw_mcp.scan import scan_templates
+
+    report = scan_templates()
+    return {item["template"].rsplit("/", 1)[-1]: item for item in report["results"]}, report
+
+
+def test_a_function_view_supplies_context_in_all_the_usual_shapes():
+    # Most Django views are written this way. On a real project the
+    # class-based reader alone resolved 28 templates out of 2181.
+    from django_chainsaw_mcp.django_env import ensure_django
+    from django_chainsaw_mcp.scan import _view_context_map
+    from pathlib import Path
+
+    mapping = _view_context_map(Path(ensure_django().project_path))
+    assert mapping["shop/render_order_list.html"] == {"orders": "shop.Order"}
+    assert mapping["shop/render_order_inline.html"] == {"orders": "shop.Order"}
+    assert mapping["shop/render_order_variable.html"] == {"orders": "shop.Order"}
+    assert mapping["shop/render_customer.html"] == {"customer": "shop.Customer"}
+
+
+def test_a_runtime_built_template_name_is_not_guessed_at():
+    from django_chainsaw_mcp.django_env import ensure_django
+    from django_chainsaw_mcp.scan import _view_context_map
+    from pathlib import Path
+
+    mapping = _view_context_map(Path(ensure_django().project_path))
+    assert not any(name.endswith(".html}") or "{" in name for name in mapping)
+
+
+def test_an_n_plus_one_inside_an_included_partial_is_found():
+    # The loop is in one file and the relation traversal is in another, and
+    # neither file is suspicious on its own.
+    results, _ = _scan()
+    inline = results["render_order_inline.html"]
+    assert inline["high_severity_count"] >= 3
+    assert "lines" in inline["suggested_queryset"]["prefetch_related"]
+    assert "product__category" in inline["suggested_queryset"]["select_related"]
+
+
+def test_include_with_only_gets_no_context_from_its_caller():
+    # `only` means exactly that, so the partial's traversals resolve against
+    # nothing and reporting them would be a fabrication.
+    results, _ = _scan()
+    assert "render_order_variable.html" not in results

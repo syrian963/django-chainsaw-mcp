@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
-from .nplusone import analyse_template
+from .nplusone import analyse_template, set_include_search_dirs
 
 _TEMPLATE_SUFFIXES = {".html", ".jinja", ".jinja2"}
 _SKIP_DIRS = {
@@ -83,6 +83,103 @@ class _ViewVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def _model_of(node: ast.AST, locals_: dict[str, str]) -> str | None:
+    """The model class name a value stands for, if it plainly is one.
+
+    `Order.objects.filter(...)`, `Order.objects.get(...)`, or a local name
+    assigned from one of those earlier in the same function.
+    """
+    if isinstance(node, ast.Name):
+        return locals_.get(node.id)
+    current = node
+    while isinstance(current, (ast.Call, ast.Attribute)):
+        current = current.func if isinstance(current, ast.Call) else current.value
+    if isinstance(current, ast.Name):
+        # Only a manager access counts. `datetime.now()` unwinds to `datetime`
+        # and would otherwise be offered as a model.
+        for attr in ast.walk(node):
+            if isinstance(attr, ast.Attribute) and attr.attr in {"objects", "_default_manager"}:
+                return current.id
+    return None
+
+
+class _RenderVisitor(ast.NodeVisitor):
+    """Context handed to a template by a function view.
+
+        def order_list(request):
+            orders = Order.objects.all()
+            return render(request, "shop/order_list.html", {"orders": orders})
+
+    This is how most Django views are written, and none of it was resolvable
+    before: on a real project the class-based reader supplied context for 28
+    templates out of 2181, so the analysis had nothing to say about the other
+    2153. The template name and the context keys are both literals here, and
+    the values are ordinary queryset chains.
+    """
+
+    _RENDERERS = {"render", "TemplateResponse", "render_to_response"}
+
+    def __init__(self) -> None:
+        # template name -> {context variable: model class name}
+        self.found: dict[str, dict[str, str]] = {}
+        self._locals: dict[str, str] = {}
+        self._dicts: dict[str, dict[str, str]] = {}
+
+    def _visit_function(self, node: ast.AST) -> None:
+        # Locals do not survive the function they were written in.
+        saved_locals, saved_dicts = self._locals, self._dicts
+        self._locals, self._dicts = {}, {}
+        self.generic_visit(node)
+        self._locals, self._dicts = saved_locals, saved_dicts
+
+    visit_FunctionDef = _visit_function  # type: ignore[assignment]
+    visit_AsyncFunctionDef = _visit_function  # type: ignore[assignment]
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            model = _model_of(node.value, self._locals)
+            if model:
+                self._locals[name] = model
+            elif isinstance(node.value, ast.Dict):
+                self._dicts[name] = self._read_dict(node.value)
+        self.generic_visit(node)
+
+    def _read_dict(self, node: ast.Dict) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in zip(node.keys, node.values):
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                continue
+            model = _model_of(value, self._locals)
+            if model:
+                out[key.value] = model
+        return out
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        if name in self._RENDERERS:
+            template = None
+            context: dict[str, str] = {}
+            for argument in node.args:
+                if template is None and isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    template = argument.value
+                elif isinstance(argument, ast.Dict):
+                    context.update(self._read_dict(argument))
+                elif isinstance(argument, ast.Name) and argument.id in self._dicts:
+                    context.update(self._dicts[argument.id])
+            for keyword in node.keywords:
+                if keyword.arg == "template_name" and isinstance(keyword.value, ast.Constant):
+                    template = keyword.value.value
+                elif keyword.arg == "context":
+                    if isinstance(keyword.value, ast.Dict):
+                        context.update(self._read_dict(keyword.value))
+                    elif isinstance(keyword.value, ast.Name) and keyword.value.id in self._dicts:
+                        context.update(self._dicts[keyword.value.id])
+            if template and context:
+                self.found.setdefault(template, {}).update(context)
+        self.generic_visit(node)
+
+
 def _view_context_map(root: Path) -> dict[str, dict[str, str]]:
     """template name -> {context variable: model label}, read from views."""
     from django.apps import apps
@@ -97,6 +194,17 @@ def _view_context_map(root: Path) -> dict[str, dict[str, str]]:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, SyntaxError):
             continue
+
+        render_visitor = _RenderVisitor()
+        render_visitor.visit(tree)
+        for template_name, context in render_visitor.found.items():
+            resolved = {
+                variable: by_class_name[model]
+                for variable, model in context.items()
+                if model in by_class_name
+            }
+            if resolved:
+                mapping.setdefault(template_name, {}).update(resolved)
 
         visitor = _ViewVisitor()
         visitor.visit(tree)
@@ -130,6 +238,12 @@ def scan_templates(
     views_dir = Path(project_root).expanduser().resolve() if project_root else config.project_path
     if not templates_dir.is_dir():
         raise ValueError(f"template_root is not a directory: {templates_dir}")
+
+    # An include is written relative to a template directory, so the scan
+    # hands over the roots it knows about for the engine to fall back on.
+    set_include_search_dirs(
+        [templates_dir] + [p.parent for p in templates_dir.rglob("templates") if p.is_dir()]
+    )
 
     from_views = _view_context_map(views_dir)
     shared = dict(root_models or {})
@@ -184,9 +298,12 @@ def scan_templates(
         "results": results,
         "note": (
             "Context is resolved from class-based views that declare both "
-            "template_name and model or queryset. Function views and anything "
-            "built at runtime cannot be resolved statically; pass root_models "
-            "for those, or they are skipped and listed. A template that could "
+            "template_name and model or queryset, and from render() and "
+            "TemplateResponse calls whose template name and context keys are "
+            "literals - which is how most function views are written. A "
+            "context built at runtime, or handed through a helper, still "
+            "cannot be read; pass root_models for those, or they are skipped "
+            "and listed. A template that could "
             "not be parsed at all is listed under templates_unreadable with the "
             "reason rather than ending the run: a partial written to be included "
             "may depend on tags its parent loads, and one of those must not cost "

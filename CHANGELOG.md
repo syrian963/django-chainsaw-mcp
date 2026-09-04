@@ -7,6 +7,22 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`scan_templates` reads `render()` and `TemplateResponse` calls**, which is
+  how most Django views are written. It previously understood only class-based
+  views declaring `template_name` plus `model`/`queryset`; measured against a
+  large real codebase that resolved context for 28 templates out of 2181, so
+  the analysis had nothing to say about the other 2153. It now reads the
+  template name and context keys from the call, resolves values through local
+  assignments, and handles a context dict built before the call. On the same
+  codebase: 81 templates analysed, 18 with findings, both roughly three times
+  what it managed before. A computed template name is still not guessed at.
+- **`{% include %}` is followed with the caller's context.** A partial rendered
+  inside a loop is the N+1 nobody sees: the loop is in one file and the
+  relation traversal is in another, and neither file is suspicious alone. Only
+  a literal template name is followed, `{% include ... only %}` correctly gets
+  an empty scope, `with x=y` rebinds what it names, recursion is capped and a
+  self-including partial is not walked twice.
+
 - **`endpoint_cost` reads the real page size and names unpaginated list
   endpoints.** The first version assumed `page_size` rows for every list view.
   A view with no `pagination_class` in a project with no

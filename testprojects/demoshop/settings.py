@@ -21,5 +21,17 @@ DATABASES = {
     }
 }
 
+# A real project always configures this. The demo did not, which meant the
+# template analysis could never resolve `{% include %}` here and the gap was
+# invisible until the checks were run against a real codebase.
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {},
+    }
+]
+
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

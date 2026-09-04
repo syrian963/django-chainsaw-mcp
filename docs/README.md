@@ -60,6 +60,7 @@ Every check here answers a question with a consequence attached:
 | --- | --- |
 | What does this delete take with it? | `delete_impact` |
 | Where are the N+1 queries? | `find_n_plus_one`, `serializer_nplusone` |
+| Which template loop renders a partial that queries? | `scan_templates` |
 | Which migration stops writes or breaks a rolling deploy? | `migration_risk` |
 | Is this destructive migration safe to ship **yet**? | `deploy_safety` |
 | Which queries read rows the caller does not own? | `find_unscoped_queries` |

@@ -1,0 +1,5 @@
+{# Rendered once per order by the list below. Nothing here says so. #}
+{{ order.customer.name }}
+{% for line in order.lines.all %}
+  {{ line.product.category.name }}
+{% endfor %}

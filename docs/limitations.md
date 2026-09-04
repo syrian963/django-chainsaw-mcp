@@ -126,6 +126,20 @@ The same applies to `api_contract`'s `unserved`: if no view anywhere declares a
 `attribution_possible: false`, rather than listing every serializer as
 unserved.
 
+### A template whose context is built by a helper
+
+`scan_templates` reads context from class-based views and from `render()` /
+`TemplateResponse` calls where the template name and the context keys are
+literals. A view that builds its context in a helper function, or picks its
+template name at runtime, cannot be resolved and is listed under
+`templates_skipped_no_context` rather than guessed at.
+
+A partial that only ever receives context through `{% include %}` is also in
+that list, but it is not unanalysed: it is walked with the caller's context
+from every template that includes it, and its findings are reported against
+that caller. The skipped list counts templates that were never a starting
+point, not templates nobody looked at.
+
 ## Two things that are not limitations
 
 **Unresolved calls in the call graph.** Most of them are the standard library,
