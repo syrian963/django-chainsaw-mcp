@@ -93,6 +93,26 @@ A second service reading the same database, a shared client library, a mobile
 app compiled last year. Nothing in this repository knows they exist. This is the
 real limit on `api_contract`: it tells you what **changed**, not who was reading.
 
+### Whether a skipped effect was wanted
+
+`bypassed_effects` says a `bulk_create` skipped the audit receiver. An import
+that deliberately skips the audit trail looks identical to one that forgot. The
+finding states what did not happen; whether that is a bug is a decision, and
+the honest fix for the deliberate case is a comment at the call site.
+
+### A lock held some other way
+
+`race_conditions` sees `select_for_update()` and `F()`. An advisory lock, a
+distributed lock, or a queue with concurrency 1 around the read-modify-save is
+just as safe and looks exactly like the race.
+
+### Routing
+
+`open_endpoints` checks every view class, because whether a class is wired into
+a URLconf is not knowable from the class. An abstract base view with no URL
+therefore appears among the open views. It also has no `permission_classes`,
+and every subclass inherits that, so it is not wasted information.
+
 ## Two things that are not limitations
 
 **Unresolved calls in the call graph.** Most of them are the standard library,

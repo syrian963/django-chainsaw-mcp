@@ -7,6 +7,40 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`open_endpoints`**: endpoints anyone can call, crossed with what their
+  serializer exposes. `serializer_exposure` knows a serializer leaks a password
+  reset token and a Semgrep rule knows a view has `AllowAny`; each is a
+  judgement call alone and neither check can connect them, because the
+  serializer does not know its views and the view does not know what its
+  serializer returns. DRF's own default permission is `AllowAny`, so a project
+  that never configured `DEFAULT_PERMISSION_CLASSES` has every unadorned view
+  public; that is reported before anything else. View modules no URLconf
+  reaches are imported first, the same way serializer modules are, and the
+  ones that fail to import are listed rather than silently missing.
+- `requests` added as a dev dependency: three demo fixtures import it, and a
+  module that fails to import is a module whose views and serializers cannot
+  be seen.
+
+- **`race_conditions`**: a field read into Python, changed, and saved -
+  `product.stock -= qty; product.save()` - so two concurrent requests
+  overwrite each other and a sale is lost. Reported only when all three parts
+  are on the same object in the same function; `F()` expressions and a
+  `select_for_update()` inside `atomic()` are the fixes and are silent. Also
+  `select_for_update()` with no transaction to hold the lock, which is not a
+  race but a `TransactionManagementError` on the first request, judged with the
+  call graph so a caller's transaction and `ATOMIC_REQUESTS` both count. No
+  linter looks at either.
+
+- **`bypassed_effects`**: bulk writes that skip everything the model's save()
+  chain promised. `bulk_create`, `bulk_update` and `QuerySet.update` go
+  straight to SQL, so no `save()` override runs and no receiver fires; Django
+  says so in one sentence per method and nothing at the call site does. The
+  finding is not the abstract fact but this call, on this model, skipping these
+  named effects - transitively, so an Invoice receiver that never fires because
+  the Invoice was never created is listed too. Models with nothing to skip are
+  not reported, and `QuerySet.delete()` is left out because its signals do
+  fire per object.
+
 - **A blind-spot audit, and thirteen of them closed.** Every stated limitation
   across the docs was collected, sorted into what is genuinely undecidable from
   source and what was merely unimplemented, and the second list was worked

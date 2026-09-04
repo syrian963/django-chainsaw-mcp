@@ -35,10 +35,19 @@ expect 1 "check (findings expected)"              $BIN check --tenant-root shop.
 # The demo project ships a blocking migration, which is critical, so raising
 # the threshold does not make it pass. Narrowing the checks does.
 expect 1 "check --fail-on critical (one exists)"  $BIN check --tenant-root shop.Customer --fail-on critical
-expect 0 "check --skip deploy-safety --fail-on critical" $BIN check --tenant-root shop.Customer --skip deploy-safety --fail-on critical
+# open_endpoints also produces criticals now, so both sources have to be
+# skipped for the aggregate to come back clean.
+expect 0 "check --skip both critical sources"        $BIN check --tenant-root shop.Customer --skip deploy-safety --skip open --fail-on critical
 expect 0 "check --only datetimes"                 $BIN check --only datetimes --fail-on critical
 expect 0 "n+1-serializer without gate"            $BIN n+1-serializer
 expect 0 "cost without gate"                      $BIN cost
+expect 0 "open without gate"                      $BIN open
+expect 1 "open --fail-on-findings"                $BIN open --fail-on-findings
+expect 0 "races without gate"                     $BIN races
+expect 1 "races --fail-on-findings"               $BIN races --fail-on-findings
+expect 0 "bypass without gate"                    $BIN bypass
+expect 1 "bypass --fail-on-findings"              $BIN bypass --fail-on-findings
+expect 0 "bypass on a model with no chain"        $BIN bypass --model shop.Product --fail-on-findings
 expect 1 "cost --max-queries 10"                  $BIN cost --max-queries 10
 expect 0 "explain shop.Customer"                  $BIN explain shop.Customer --tenant-root shop.Customer
 expect 0 "explain shop.Order"                     $BIN explain shop.Order --tenant-root shop.Customer

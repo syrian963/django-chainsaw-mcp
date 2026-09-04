@@ -33,7 +33,10 @@ from . import fixes as _fixes
 from .datetimes import datetime_audit
 from .api_contract import CONTRACT_FILE, contract, diff as contract_diff
 from .api_contract import load_snapshot, write_snapshot
+from .bypass import bypassed_effects
+from .concurrency import race_conditions
 from .deploy_safety import deploy_safety
+from .exposure_auth import open_endpoints
 from .on_commit import escaping_side_effects
 from .endpoint_cost import endpoint_cost
 from .explain import explain_model
@@ -320,6 +323,121 @@ def _cmd_oncommit(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["high_severity_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_bypass(args: argparse.Namespace) -> int:
+    report = bypassed_effects(search_path=args.search_path, model=args.model)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"No bulk write skips a save() chain "
+                  f"({report['bulk_writes_seen']} bulk write(s) seen, all on models "
+                  "with nothing to skip).")
+        else:
+            print(f"{report['finding_count']} bulk write(s) that skip a save() chain")
+            print()
+            for f in report["findings"]:
+                print(f"  {f['severity'].upper():<6} {f['file']}:{f['line']}  "
+                      f"{f['model']} via .{f['method']}()")
+                print(f"         {f['code']}")
+                print(f"         {f['what_is_skipped']}")
+                if f["overrides_not_run"]:
+                    print(f"         save() not run   : {', '.join(f['overrides_not_run'])}")
+                if f["receivers_not_fired"]:
+                    print(f"         receivers skipped: {', '.join(f['receivers_not_fired'])}")
+                if f["models_not_written"]:
+                    print(f"         never written    : {', '.join(f['models_not_written'])}")
+                print()
+        if report["bulk_writes_on_unresolved_model"]:
+            print(f"{report['bulk_writes_on_unresolved_model']} bulk write(s) on a queryset "
+                  "held in a variable: model unknown, not reported.")
+        print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_severity_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_races(args: argparse.Namespace) -> int:
+    report = race_conditions(
+        search_path=args.search_path,
+        include_parameters=not args.no_parameters,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"No read-modify-save races and no unprotected row locks in "
+                  f"{report['files_scanned']} file(s).")
+        if report["races"]:
+            print(f"{report['race_count']} read-modify-save race(s)")
+            print()
+            for f in report["races"]:
+                flag = "" if f["confidence"] == "high" else f" ({f['confidence']} confidence: {f['instance_origin']})"
+                print(f"  {f['file']}:{f['line']}  {f['instance']}.{f['field']} in {f['function']}{flag}")
+                print(f"         {f['code']}")
+                print(f"         saved at line {f['saved_at_line']}; {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        if report["locks_outside_transaction"]:
+            print(f"{report['unlocked_lock_count']} select_for_update() with no transaction to hold the lock")
+            print()
+            for f in report["locks_outside_transaction"]:
+                print(f"  {f['file']}:{f['line']}  in {f['function']}")
+                print(f"         {f['code']}")
+                print(f"         {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_confidence_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_open(args: argparse.Namespace) -> int:
+    report = open_endpoints(include_unbounded=not args.sensitive_only)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["rest_framework_installed"]:
+            print(report["note"])
+            return EXIT_OK
+        print(f"Default permission: {', '.join(report['default_permission_classes'])} "
+              f"({report['default_permission_source']})")
+        if report["default_is_open"]:
+            print("  -> every view without its own permission_classes is public.")
+        print(f"{report['views_checked']} view(s): {report['open_view_count']} open, "
+              f"{report['protected_view_count']} protected, "
+              f"{len(report['views_deciding_at_runtime'])} deciding at runtime")
+        print()
+        if not report["finding_count"]:
+            print("No open endpoint exposes anything sensitive or unbounded.")
+        for f in report["findings"]:
+            print(f"  {f['severity'].upper():<9} {f['view']}")
+            print(f"            permission: {', '.join(f['permission_classes'])} ({f['permission_source']})")
+            print(f"            serializer: {f['serializer']}")
+            print(f"            {f['why']}")
+            print(f"            fix: {f['fix']}")
+            print()
+        if report["views_deciding_at_runtime"]:
+            print("Deciding permissions at runtime (get_permissions), not judged:")
+            for v in report["views_deciding_at_runtime"]:
+                print(f"    {v}")
+            print()
+        failed = report["view_discovery"].get("failed", [])
+        if failed:
+            print("View modules that could not be imported, so their views are not here:")
+            for entry in failed:
+                print(f"    {entry['module']}: {entry['error']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["critical_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1068,6 +1186,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 if any high-severity call escapes a transaction")
     p.set_defaults(func=_cmd_oncommit)
+
+    p = sub.add_parser("bypass", help="bulk writes that skip a model's save() chain")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--model", metavar="app_label.ModelName")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 if any bulk write skips effects that write or send")
+    p.set_defaults(func=_cmd_bypass)
+
+    p = sub.add_parser("races", help="read-modify-save races and locks outside a transaction")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--no-parameters", action="store_true",
+                   help="only report instances fetched in the same function")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any high-confidence race or unprotected lock")
+    p.set_defaults(func=_cmd_races)
+
+    p = sub.add_parser("open", help="open endpoints crossed with what their serializer exposes")
+    p.add_argument("--sensitive-only", action="store_true",
+                   help="skip open endpoints whose only problem is __all__ or exclude")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 if any open endpoint exposes a sensitive field")
+    p.set_defaults(func=_cmd_open)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

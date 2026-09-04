@@ -33,6 +33,9 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`endpoint_cost`](endpoint-cost.md) | how many queries one request costs, before anybody sends one |
 | [`api_contract`](api-contract.md) | what this branch changes about the API, and who it breaks |
 | [`escaping_side_effects`](on-commit.md) | emails and tasks fired inside a transaction that can still roll back |
+| [`bypassed_effects`](bypass.md) | bulk writes that skip everything the save() chain promised |
+| [`race_conditions`](concurrency.md) | counters changed in Python and saved, and locks with no transaction |
+| [`open_endpoints`](open-endpoints.md) | sensitive fields on endpoints anybody can call |
 
 ## Understanding it
 
@@ -65,6 +68,9 @@ Every check here answers a question with a consequence attached:
 | What will one request to this endpoint cost? | `endpoint_cost` |
 | Which clients does this branch break? | `api_contract` |
 | Which sends cannot be taken back if this rolls back? | `escaping_side_effects` |
+| Which bulk writes skip the effects the model promised? | `bypassed_effects` |
+| Which counters lose updates under load? | `race_conditions` |
+| Which public endpoints return something sensitive? | `open_endpoints` |
 | Which datetimes break when the clock moves? | `datetime_audit` |
 | What does the API expose that nobody decided to? | `serializer_exposure` |
 | **All of the above about one model, and the risks only visible combined** | `explain_model` |

@@ -366,6 +366,62 @@ Documented in [`on-commit.md`](on-commit.md).
 
 ---
 
+## `bypassed_effects`
+
+Bulk writes on models whose `save()` chain they silently skip. `bulk_create`,
+`bulk_update` and `QuerySet.update` go straight to SQL: no `save()` override, no
+`pre_save`/`post_save`. Everything `what_happens_on` lists for the model does
+not occur on those lines.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `model` | all | restrict to one `app_label.ModelName` |
+
+Only models whose chain does something are reported; a bulk write on a model
+with no receivers and no override is just fast. `QuerySet.delete()` is not
+listed because Django sends the delete signals per object.
+
+Documented in [`bypass.md`](bypass.md).
+
+---
+
+## `race_conditions`
+
+Read-modify-save races — a field read into Python, changed, and saved, so two
+concurrent requests overwrite each other — and `select_for_update()` calls with
+no transaction to hold the lock, which raise on evaluation.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_parameters` | `true` | also report instances passed in as parameters, at medium confidence |
+
+`F()` expressions and a `select_for_update()` inside `atomic()` are the fixes
+and are silent. Transactions are judged with the call graph: a decorator, a
+caller's `atomic()` and `ATOMIC_REQUESTS` on a view all count.
+
+Documented in [`concurrency.md`](concurrency.md).
+
+---
+
+## `open_endpoints`
+
+Endpoints anyone can call, crossed with what their serializer exposes. Neither
+half is a finding alone; the intersection is. DRF's default permission is
+`AllowAny`, and whether the project changed that is reported first.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `include_unbounded` | `true` | also report open endpoints on `__all__`/`exclude` serializers with nothing sensitive today |
+
+Views overriding `get_permissions()` are listed, not judged. View modules that
+fail to import are reported, not swallowed.
+
+Documented in [`open-endpoints.md`](open-endpoints.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

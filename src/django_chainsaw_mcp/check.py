@@ -24,6 +24,9 @@ from .datetimes import datetime_audit
 from .deploy_safety import deploy_safety
 from .django_env import ensure_django
 from .indexes import missing_indexes
+from .bypass import bypassed_effects
+from .concurrency import race_conditions
+from .exposure_auth import open_endpoints
 from .migrations import migration_risk
 from .on_commit import escaping_side_effects
 from .scan import scan_templates
@@ -155,6 +158,51 @@ def _from_on_commit(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _from_bypass(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _finding(
+            "bypass", f["severity"],
+            f"{f['model']}.{f['method']}() skips the save() chain",
+            f"{f['file']}:{f['line']}",
+            "not fired: " + ", ".join(f["receivers_not_fired"] + f["overrides_not_run"]),
+            f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+
+
+def _from_races(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "races", "high" if f["confidence"] == "high" else "medium",
+            f"{f['instance']}.{f['field']} is read, changed in Python and saved",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("races", [])
+    ]
+    out += [
+        _finding(
+            "races", "high",
+            "select_for_update() with no transaction to hold the lock",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("locks_outside_transaction", [])
+    ]
+    return out
+
+
+def _from_open(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _finding(
+            "open", f["severity"],
+            f"{f['view'].rsplit('.', 1)[-1]} is public and exposes "
+            + (", ".join(f["sensitive_fields"]) if f["sensitive_fields"] else f"every field ({f['mode']})"),
+            f["view"], f["why"], f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for entry in report.get("migrations", []):
@@ -182,6 +230,9 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "indexes": (missing_indexes, lambda o: {}, _from_indexes),
     "datetimes": (datetime_audit, lambda o: {}, _from_datetimes),
     "on-commit": (escaping_side_effects, lambda o: {}, _from_on_commit),
+    "bypass": (bypassed_effects, lambda o: {}, _from_bypass),
+    "races": (race_conditions, lambda o: {}, _from_races),
+    "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
 }
 

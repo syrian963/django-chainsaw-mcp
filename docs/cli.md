@@ -150,6 +150,38 @@ Side effects inside a transaction that cannot be rolled back. `--fail-on-finding
 exits `1` on any high-severity one; cache writes are medium and do not fail the
 gate alone. Also available in the aggregate `check` as `on-commit`.
 
+### `bypass`
+
+```bash
+django-chainsaw bypass [--search-path DIR] [--model app.Model] [--fail-on-findings]
+```
+
+Bulk writes that skip a model's `save()` chain, with the receivers, overrides
+and downstream models named per call. `--fail-on-findings` exits `1` when a
+skipped chain writes or sends something. Also in the aggregate `check` as
+`bypass`.
+
+### `races`
+
+```bash
+django-chainsaw races [--search-path DIR] [--no-parameters] [--fail-on-findings]
+```
+
+Read-modify-save races and `select_for_update()` outside a transaction.
+`--fail-on-findings` exits `1` on any high-confidence race or any unprotected
+lock; `--no-parameters` drops the medium-confidence tier. Also in the aggregate
+`check` as `races`.
+
+### `open`
+
+```bash
+django-chainsaw open [--sensitive-only] [--fail-on-findings]
+```
+
+Public endpoints whose serializer exposes a sensitive field (critical) or every
+field via `__all__`/`exclude` (medium). `--fail-on-findings` exits `1` on any
+critical. Also in the aggregate `check` as `open`.
+
 ### `indexes`
 
 ```bash

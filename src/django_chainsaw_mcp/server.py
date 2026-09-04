@@ -25,7 +25,9 @@ from .api_contract import contract as _contract
 from .api_contract import diff as _contract_diff
 from .api_contract import load_snapshot as _load_contract
 from .api_contract import write_snapshot as _write_contract
+from .bypass import bypassed_effects as _bypassed_effects
 from .check import run_all as _run_all
+from .concurrency import race_conditions as _race_conditions
 from .on_commit import escaping_side_effects as _escaping_side_effects
 from .endpoint_cost import endpoint_cost as _endpoint_cost
 from .suggest import suggest_fixes as _suggest_fixes
@@ -34,6 +36,7 @@ from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
 from .explain import explain_model as _explain_model
+from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
@@ -213,6 +216,82 @@ def escaping_side_effects(
         search_path=search_path,
         include_low_confidence=include_low_confidence,
     )
+
+
+@mcp.tool()
+def bypassed_effects(search_path: str | None = None, model: str | None = None) -> dict[str, Any]:
+    """Bulk writes that skip everything the model's save() chain promised.
+
+    what_happens_on says saving an Order creates an Invoice. That is true for
+    order.save() and false for Order.objects.bulk_create(), .bulk_update() and
+    .update(): they go straight to SQL, so no save() override runs and no
+    pre_save/post_save receiver fires. Django documents this in one sentence
+    per method; nothing at the call site says it.
+
+    The finding is not "bulk_create bypasses signals" but this call, on this
+    model, skips these named effects - the receivers, the overridden save(),
+    the models that would have been written, transitively. A cache that never
+    gets invalidated and a search index that quietly drifts are both this.
+
+    Only models whose chain does something are reported. QuerySet.delete() is
+    not listed: Django sends delete signals per object, so that chain fires.
+
+    Args:
+        search_path: directory to scan. Defaults to the project root.
+        model: restrict to one "app_label.ModelName".
+    """
+    return _guard(_bypassed_effects, search_path=search_path, model=model)
+
+
+@mcp.tool()
+def race_conditions(search_path: str | None = None, include_parameters: bool = True) -> dict[str, Any]:
+    """Read-modify-save races, and row locks taken outside any transaction.
+
+        product = Product.objects.get(pk=pk)
+        product.stock -= quantity
+        product.save()
+
+    Two requests read 10, both subtract 3, both write 7; one sale is gone. A
+    transaction does not help, since neither sees the other's uncommitted
+    write. The fix is F("stock") - quantity so the database does the maths,
+    or select_for_update() inside atomic() to hold the row - and both of
+    those are silent here. Counters, balances, stock, retry counts: the
+    fields where off-by-one costs money.
+
+    Also: select_for_update() with no atomic() around it, which is not a race
+    but a TransactionManagementError the first time the line is reached.
+    Whether a transaction is open is judged with the call graph, so a caller's
+    atomic(), a decorator and ATOMIC_REQUESTS on a view all count.
+
+    Args:
+        search_path: directory to scan. Defaults to the project root.
+        include_parameters: also report mutations of an instance passed in
+            as a parameter, at medium confidence (the caller may hold a lock).
+    """
+    return _guard(_race_conditions, search_path=search_path, include_parameters=include_parameters)
+
+
+@mcp.tool()
+def open_endpoints(include_unbounded: bool = True) -> dict[str, Any]:
+    """Endpoints anyone can call, crossed with what their serializer exposes.
+
+    serializer_exposure knows CustomerExportSerializer leaks a password reset
+    token; a Semgrep rule knows a view has AllowAny. Each alone is a judgement
+    call - maybe the serializer only feeds an admin export, maybe the view
+    serves a catalogue. Together there is nothing left to judge, and neither
+    check can make the connection alone.
+
+    DRF's own default permission is AllowAny. A project that never configured
+    DEFAULT_PERMISSION_CLASSES has every view without explicit
+    permission_classes open, and none of them say so; that is volunteered
+    first. Views overriding get_permissions() are listed, not judged.
+
+    Args:
+        include_unbounded: also report open endpoints whose serializer uses
+            fields="__all__" or exclude, even with nothing sensitive on the
+            model today. The next migration decides what leaks.
+    """
+    return _guard(_open_endpoints, include_unbounded=include_unbounded)
 
 
 @mcp.tool()

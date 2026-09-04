@@ -20,6 +20,7 @@ class Product(models.Model):
     sku = models.CharField(max_length=32, unique=True, db_index=True)
     name = models.CharField(max_length=200)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
     category = models.ForeignKey(
         Category,
         on_delete=models.PROTECT,

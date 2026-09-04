@@ -584,3 +584,155 @@ def test_a_serializer_that_rewrites_its_own_output_is_named():
     for name, entry in captured["serializers"].items():
         assert "reshapes_output" in entry, name
     assert isinstance(captured["reshaped"], list)
+
+
+def _bypass():
+    from django_chainsaw_mcp.bypass import bypassed_effects
+
+    return bypassed_effects()
+
+
+def test_a_bulk_write_on_a_model_with_a_chain_names_what_it_skips():
+    # The finding is not "bulk_create bypasses signals" but this call, on this
+    # model, skipping these effects. Without the names it is a lecture.
+    order = [f for f in _bypass()["findings"] if f["model"] == "shop.Order" and f["method"] == "bulk_create"]
+    assert order, "Order.objects.bulk_create skips the invoice receiver"
+    assert any("create_invoice_for_order" in r for r in order[0]["receivers_not_fired"])
+    assert "shop.Invoice" in order[0]["models_not_written"]
+
+
+def test_the_skipped_chain_is_followed_transitively():
+    # announce_invoice is a receiver on Invoice, one hop down. It never fires
+    # because the Invoice is never created, and the finding has to say so.
+    order = next(f for f in _bypass()["findings"] if f["model"] == "shop.Order")
+    assert any("announce_invoice" in r for r in order["receivers_not_fired"])
+
+
+def test_an_overridden_save_counts_as_skipped_too():
+    shipment = next(f for f in _bypass()["findings"] if f["model"] == "shop.Shipment")
+    assert shipment["method"] == "bulk_update"
+    assert any("AuditedMixin.save" in o for o in shipment["overrides_not_run"])
+
+
+def test_a_bulk_write_on_a_model_with_nothing_to_skip_is_not_a_finding():
+    # Product has no receivers and no save() override. bulk_create on it is
+    # just fast, and reporting it is how a check earns an ignore rule.
+    report = _bypass()
+    assert not [f for f in report["findings"] if f["model"] == "shop.Product"]
+    assert report["bulk_writes_seen"] > report["finding_count"]
+
+
+def test_a_bulk_write_on_an_unknown_model_is_counted_not_invented():
+    report = _bypass()
+    assert report["bulk_writes_on_unresolved_model"] >= 1
+    assert all(f["model"] for f in report["findings"])
+
+
+def _races():
+    from django_chainsaw_mcp.concurrency import race_conditions
+
+    return race_conditions()
+
+
+def _race_functions(report):
+    return {f["function"].rsplit(".", 1)[-1]: f for f in report["races"]}
+
+
+def test_a_fetched_instance_changed_in_python_and_saved_is_a_race():
+    found = _race_functions(_races())
+    assert "reserve" in found and found["reserve"]["confidence"] == "high"
+    assert found["reserve"]["field"] == "stock"
+    # Spelled out long-hand it is the same defect.
+    assert "reserve_long_hand" in found
+
+
+def test_the_three_correct_spellings_are_silent():
+    # F() on the queryset, F() on the instance, select_for_update inside
+    # atomic. If any of these is reported the check is noise and gets
+    # switched off within a week.
+    found = _race_functions(_races())
+    for name in ("reserve_with_update", "reserve_with_f", "reserve_locked"):
+        assert name not in found, found[name] if name in found else None
+
+
+def test_a_plain_assignment_is_not_read_modify_write():
+    assert "reprice" not in _race_functions(_races())
+
+
+def test_a_parameter_is_reported_at_medium_confidence_and_can_be_dropped():
+    from django_chainsaw_mcp.concurrency import race_conditions
+
+    found = _race_functions(_races())
+    assert found["bump_retries"]["confidence"] == "medium"
+    without = _race_functions(race_conditions(include_parameters=False))
+    assert "bump_retries" not in without
+    assert "reserve" in without
+
+
+def test_a_lock_with_no_transaction_is_a_crash_not_a_race():
+    report = _races()
+    names = {f["function"].rsplit(".", 1)[-1] for f in report["locks_outside_transaction"]}
+    assert "lock_without_transaction" in names
+    # The decorator is the transaction; the with-block is the transaction.
+    assert "lock_under_decorator" not in names
+    assert "reserve_locked" not in names
+
+
+def _open():
+    from django_chainsaw_mcp.exposure_auth import open_endpoints
+
+    return open_endpoints()
+
+
+def _open_views(report):
+    return {f["view"].rsplit(".", 1)[-1]: f for f in report["findings"]}
+
+
+def test_an_explicitly_open_view_on_a_leaking_serializer_is_critical():
+    found = _open_views(_open())
+    assert found["PublicCustomerExport"]["severity"] == "critical"
+    assert "password_reset_token" in found["PublicCustomerExport"]["sensitive_fields"]
+    assert found["PublicCustomerExport"]["permission_source"] == "set on the view"
+
+
+def test_the_implicit_default_is_the_same_finding_and_says_where_it_came_from():
+    # No permission_classes at all is the shape most leaks have. The finding
+    # must say the permission came from the default, not from the view.
+    found = _open_views(_open())
+    entry = found["ImplicitlyOpenCustomers"]
+    assert entry["severity"] == "critical"
+    assert "default" in entry["permission_source"]
+
+
+def test_the_same_serializer_behind_auth_is_not_a_finding():
+    report = _open()
+    assert "StaffCustomerExport" not in _open_views(report)
+    assert report["protected_view_count"] >= 1
+
+
+def test_an_open_view_exposing_nothing_sensitive_is_medium_at_most():
+    from django_chainsaw_mcp.exposure_auth import open_endpoints
+
+    found = _open_views(_open())
+    assert found["PublicCatalogue"]["severity"] == "medium"
+    # and it disappears entirely when only sensitive fields are asked for
+    assert "PublicCatalogue" not in _open_views(open_endpoints(include_unbounded=False))
+
+
+def test_a_view_deciding_at_runtime_is_listed_not_judged():
+    report = _open()
+    runtime = {v.rsplit(".", 1)[-1] for v in report["views_deciding_at_runtime"]}
+    assert "DecidedAtRuntime" in runtime
+    assert "DecidedAtRuntime" not in _open_views(report)
+
+
+def test_the_open_default_is_volunteered():
+    report = _open()
+    assert report["default_is_open"] is True
+    assert report["note"].startswith("The default permission is open")
+
+
+def test_every_view_module_imports():
+    # A module that fails to import is a module whose views are invisible,
+    # and this project's own fixtures must not be in that state.
+    assert _open()["view_discovery"]["failed"] == []
