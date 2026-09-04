@@ -70,6 +70,8 @@ Every tool here answers a question with a consequence:
 | Where are the N+1 queries? | `find_n_plus_one`, `scan_templates` |
 | Which migration stops writes or breaks a rolling deploy? | `migration_risk` |
 | Is this destructive migration safe to ship *yet*? | `deploy_safety` |
+| Which queries read rows the caller does not own? | `find_unscoped_queries` |
+| What does this save actually trigger? | `what_happens_on` |
 
 ## Static analysis, and being honest about it
 
@@ -145,6 +147,8 @@ src/django_chainsaw_mcp/
     scan.py           directory sweep, context from views
     migrations.py     migration operations by production risk
     deploy_safety.py  migrations against remaining code references
+    tenancy.py        ownership paths, unscoped queryset detection
+    signals.py        signal chain tracing through receiver bodies
     server.py         MCP tools and resource
     cli.py            subcommands and exit codes
 testprojects/         throwaway Django project used by the tests

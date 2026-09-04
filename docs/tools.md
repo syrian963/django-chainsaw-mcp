@@ -208,6 +208,32 @@ treated as scoped because their contents cannot be read statically.
 
 ---
 
+## `what_happens_on`
+
+**What a save or delete actually triggers.** Follows the signal chain
+transitively rather than listing registered receivers. See
+[`signals.md`](signals.md) for the reasoning.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `model_label` | required | `app_label.ModelName` |
+| `event` | `save` | `save` or `delete` |
+| `max_depth` | `4` | how far to follow writes into further signals |
+
+Returns the ordered `chain`, every `side_effects` entry found along it (Celery
+tasks, cache writes, mail, outbound HTTP), `models_written`, and
+`unreadable_receivers` for anything whose source could not be parsed.
+
+Write targets resolve two ways: by class name for `Invoice.objects.create(...)`,
+and through the sending model's relations for `instance.order.save()`. Without
+the second the chain stops at the first hop.
+
+**Does not see:** conditions (a write inside `if created:` is reported as if it
+always happens), receivers connected after startup, overridden `save()` methods,
+and dynamic dispatch.
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

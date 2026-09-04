@@ -33,6 +33,8 @@ expect 0 "delete-impact shop.Customer"            $BIN delete-impact shop.Custom
 expect 0 "models --short"                         $BIN models --short
 expect 1 "tenancy --fail-on-findings"             $BIN tenancy --tenant-root shop.Customer --fail-on-findings
 expect 0 "tenancy without gate"                   $BIN tenancy --tenant-root shop.Customer
+expect 0 "signals shop.OrderLine"                 $BIN signals shop.OrderLine
+expect 2 "signals with unknown model"             $BIN signals nope.Nope
 
 echo
 if [ "$fails" -gt 0 ]; then

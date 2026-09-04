@@ -24,6 +24,7 @@ from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, Djang
 from .introspect import list_models
 from .migrations import migration_risk
 from .scan import scan_templates
+from .signals import what_happens_on
 from .tenancy import find_unscoped_queries
 
 EXIT_OK = 0
@@ -42,6 +43,40 @@ def _bootstrap(args: argparse.Namespace) -> None:
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
+
+
+def _cmd_signals(args: argparse.Namespace) -> int:
+    report = what_happens_on(args.model, event=args.event, max_depth=args.max_depth)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['model']}.{report['event']}() triggers "
+              f"{report['receiver_count']} receiver(s)")
+        if report["models_written"]:
+            print(f"Models written along the way: {', '.join(report['models_written'])}")
+        print()
+        for step in report["chain"]:
+            indent = "  " * (step.get("depth", 0) + 1)
+            if "receiver" not in step:
+                print(f"{indent}(cycle) {step['model']}: {step['note']}")
+                continue
+            print(f"{indent}{step['signal']:<12} {step['receiver']}  on {step['on_model']}")
+            for write in step.get("writes", []):
+                target = write["resolved_model"] or "unresolved"
+                print(f"{indent}    writes {write['target']}.{write['method']}() -> {target}")
+            for effect in step.get("side_effects", []):
+                print(f"{indent}    {effect['kind']}: {effect['call']}()  ({effect['why']})")
+        if report["side_effects"]:
+            print()
+            print("Side effects in total:")
+            for effect in report["side_effects"]:
+                print(f"  {effect['kind']:<22} {effect['call']}()  via {effect['receiver']}")
+        if report["unreadable_receivers"]:
+            print()
+            print("Receivers whose source could not be read:")
+            for name in report["unreadable_receivers"]:
+                print(f"  {name}")
+    return EXIT_OK
 
 
 def _cmd_tenancy(args: argparse.Namespace) -> int:
@@ -228,6 +263,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-high", type=int, metavar="N",
                    help="exit 1 if more than N high severity candidates are found")
     p.set_defaults(func=_cmd_nplusone)
+
+    p = sub.add_parser("signals", help="what a save or delete actually triggers")
+    p.add_argument("model", help="app_label.ModelName")
+    p.add_argument("--event", choices=["save", "delete"], default="save")
+    p.add_argument("--max-depth", type=int, default=4)
+    p.set_defaults(func=_cmd_signals)
 
     p = sub.add_parser("tenancy", help="querysets on owned data with no ownership filter")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model",

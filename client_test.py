@@ -123,6 +123,16 @@ async def main() -> int:
         if "shop.Product" in (tenancy.get("tenant_scoped_models") or {}):
             failures.append("Product must not be treated as tenant-scoped")
 
+        chain = _payload(
+            await client.call_tool("what_happens_on", {"model_label": "shop.OrderLine"})
+        )
+        print("WHAT_HAPPENS_ON receivers=", chain.get("receiver_count"),
+              "written=", chain.get("models_written"))
+        if chain.get("receiver_count") != 3:
+            failures.append(f"expected a three-receiver chain, got {chain.get('receiver_count')}")
+        if "delay" not in {e["call"] for e in chain.get("side_effects", [])}:
+            failures.append("the Celery task three hops away did not surface over the wire")
+
         resources = await client.list_resources()
         uris = [str(r.uri) for r in resources.resources]
         print("RESOURCES:", ", ".join(uris) or "(none)")

@@ -23,6 +23,7 @@ from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
 from .nplusone import analyse_template as _analyse_template
 from .scan import scan_templates as _scan_templates
+from .signals import what_happens_on as _what_happens_on
 from .tenancy import find_unscoped_queries as _find_unscoped_queries
 
 mcp = MCPServer("django-chainsaw")
@@ -131,6 +132,27 @@ def scan_templates(
         project_root=project_root,
         root_models=root_models,
     )
+
+
+@mcp.tool()
+def what_happens_on(model_label: str, event: str = "save", max_depth: int = 4) -> dict[str, Any]:
+    """Follow the signal chain a save or delete actually triggers.
+
+    Nothing at an `order.save()` call site hints that it also writes an Invoice,
+    clears a cache and queues a task, because the receivers live elsewhere and
+    were connected in AppConfig.ready(). Tools that list registered receivers
+    exist; this follows the chain, because the second hop is where the surprise
+    lives.
+
+    It is also the other half of delete_impact, which deliberately ignores
+    signals and says so.
+
+    Args:
+        model_label: "app_label.ModelName".
+        event: "save" or "delete".
+        max_depth: how far to follow writes into further signals.
+    """
+    return _guard(_what_happens_on, model_label=model_label, event=event, max_depth=max_depth)
 
 
 @mcp.tool()

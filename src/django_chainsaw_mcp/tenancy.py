@@ -40,6 +40,10 @@ from .django_env import ensure_django
 _FILTERING = {"filter", "exclude", "get", "get_or_create", "update_or_create"}
 # Chain methods that return rows without narrowing them.
 _UNSCOPED_ENTRY = {"all", "first", "last", "latest", "earliest", "count", "iterator"}
+# Pure writes. There is no data to leak by inserting a row, so a chain that ends
+# in one of these is not an authorisation question at all. get_or_create and
+# update_or_create are deliberately absent: they read first.
+_PURE_WRITES = {"create", "bulk_create"}
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox",
@@ -211,6 +215,12 @@ def find_unscoped_queries(
             if not class_name:
                 continue
             chains_seen += 1
+
+            # Inserting a row cannot leak anybody's data. Flagging
+            # Invoice.objects.create(order=instance) as an authorisation
+            # problem is noise, and noise is how these tools get switched off.
+            if any(method in _PURE_WRITES for method in methods):
+                continue
 
             label = by_class.get(class_name)
             if not label or label not in paths:

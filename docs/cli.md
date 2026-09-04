@@ -51,6 +51,18 @@ Without it the command only reports.
 Use a ratchet rather than zero on an existing project: set N to today's count
 and lower it as you go.
 
+### `signals`
+
+```bash
+django-chainsaw signals app_label.ModelName [--event save|delete] [--max-depth N]
+```
+
+Prints the signal chain a save or delete sets off, indented by hop, with the
+model writes and side effects at each step. Always exits `0`.
+
+Worth running next to `delete-impact`: one shows what the schema removes, the
+other what the code removes.
+
 ### `tenancy`
 
 ```bash

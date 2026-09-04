@@ -15,6 +15,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   template context from class-based views that declare `template_name` with
   `model` or `queryset`. `find_n_plus_one` needs a context map typed by hand,
   which is fine from an assistant and useless in CI.
+- **`what_happens_on`**: follows the signal chain a save or delete sets off,
+  through receiver bodies and into the signals those writes fire in turn.
+  Receivers come from the live registry; their bodies are read with the AST.
+  Write targets resolve by class name and, more usefully, through the sending
+  model's relations, so `instance.order.save()` continues the chain instead of
+  ending it. Tools that list receivers exist; none follow the second hop, which
+  is where a Celery task three models away turns up. It is also the half
+  `delete_impact` documents itself as missing.
 - **`find_unscoped_queries`**: reports querysets that read tenant-scoped rows
   without an ownership filter, the shape behind most IDOR reports. Generic
   static analysers struggle with this class because the defect is the absence of
@@ -86,6 +94,12 @@ of tooling actually has.
 - **CRLF line endings in the shell scripts.** Editing them from a Windows host
   through the WSL share wrote `\r\n`, and bash failed with a syntax error on a
   line that looked correct. A `.gitattributes` now pins `eol=lf`.
+
+- **`find_unscoped_queries` flagged `create()`.** Adding signal fixtures
+  surfaced it: `Invoice.objects.create(order=instance)` was reported as an
+  authorisation problem. Inserting a row cannot leak anybody's data, and the bug
+  class is unauthorised reads. Chains ending in a pure write are skipped;
+  `get_or_create` and `update_or_create` still count, because they read first.
 
 ### Changed
 

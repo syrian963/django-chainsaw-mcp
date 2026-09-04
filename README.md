@@ -12,7 +12,8 @@ looked at answer *what will hurt*:
 - which pending migration stops writes or breaks the code that is still running
   during a rolling deploy,
 - whether a destructive migration is safe to ship **yet**,
-- and which queries read tenant-scoped rows without scoping the query.
+- which queries read tenant-scoped rows without scoping the query,
+- and what a single `save()` actually sets off, three hops away.
 
 Everything is read-only, and most of it never touches the database.
 
@@ -35,6 +36,7 @@ Everything is read-only, and most of it never touches the database.
 | `migration_risk` | Migrations rated: blocks writes, rewrites the table, breaks running code. |
 | `deploy_safety` | **Is this destructive migration safe to ship yet?** |
 | `find_unscoped_queries` | **Which queries read data the caller may not own?** The IDOR shape. |
+| `what_happens_on` | **What does this save actually trigger?** Follows the signal chain. |
 
 Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
@@ -91,6 +93,31 @@ high    shop/api.py:14   Order.objects.get(pk=pk)
 
 Models with no path to the owner, like the product catalogue, are never
 reported. Details and the blind spots: [`docs/tenancy.md`](docs/tenancy.md).
+
+## And the third: what a save really does
+
+```python
+line.save()
+```
+
+That queues a Celery task. Nothing about the line says so, because the task is
+three hops away:
+
+```
+OrderLine.save()
+  post_save  touch_order                writes instance.order -> shop.Order
+    post_save  create_invoice_for_order  writes Invoice.create() -> shop.Invoice
+      post_save  announce_invoice        cache write: set()
+                                         celery task: delay()
+```
+
+Tools that **list** signal receivers exist and are good. None of them follow the
+chain, and the second hop is where the surprise lives. Resolving
+`instance.order` needs the model graph, which is why it fits here.
+
+This is also the other half of `delete_impact`, which walks `on_delete` and says
+in its own output that it ignores signals. Details:
+[`docs/signals.md`](docs/signals.md).
 
 ## Quick start
 
@@ -164,6 +191,7 @@ someone in the wrong direction.
 | [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
 | [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |
 | [`docs/tenancy.md`](docs/tenancy.md) | the IDOR shape, and why the model graph makes it checkable |
+| [`docs/signals.md`](docs/signals.md) | tracing the signal chain, and the other half of `delete_impact` |
 | [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
 | [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |

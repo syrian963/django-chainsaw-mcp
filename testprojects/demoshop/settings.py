@@ -11,7 +11,7 @@ ALLOWED_HOSTS: list[str] = []
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
-    "shop",
+    "shop.apps.ShopConfig",
 ]
 
 DATABASES = {

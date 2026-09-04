@@ -11,6 +11,7 @@ from django_chainsaw_mcp.cascade import delete_impact  # noqa: E402
 from django_chainsaw_mcp.deploy_safety import deploy_safety  # noqa: E402
 from django_chainsaw_mcp.migrations import migration_risk  # noqa: E402
 from django_chainsaw_mcp.nplusone import analyse_template  # noqa: E402
+from django_chainsaw_mcp.signals import what_happens_on  # noqa: E402
 from django_chainsaw_mcp.tenancy import find_unscoped_queries  # noqa: E402
 
 ROOT = Path(__file__).parent
@@ -183,6 +184,45 @@ check(not (scoped_lines & {line for _, line in flagged}),
       f"the correctly scoped views must not be flagged, got {sorted(flagged)}")
 check(all(f["model"] != "shop.Product" for f in tenancy["findings"]),
       "Product.objects.all() is legitimate and must not be flagged")
+
+print()
+print("=" * 70)
+print("what_happens_on: shop.OrderLine save, three hops deep")
+print("=" * 70)
+chain = what_happens_on("shop.OrderLine", "save")
+print("receivers:", chain["receiver_count"], "| models written:", chain["models_written"])
+for step in chain["chain"]:
+    if "receiver" not in step:
+        print("  (cycle)", step["model"], step["note"])
+        continue
+    print("  d{} {:<28} on {}".format(step["depth"], step["receiver"].split(".")[-1], step["on_model"]))
+    for write in step.get("writes", []):
+        print("        writes {} -> {}".format(write["target"], write["resolved_model"]))
+    for effect in step.get("side_effects", []):
+        print("        {}: {}()".format(effect["kind"], effect["call"]))
+
+check(chain["receiver_count"] == 3,
+      f"the chain is three receivers deep, got {chain['receiver_count']}")
+check(set(chain["models_written"]) == {"shop.Order", "shop.Invoice"},
+      f"OrderLine.save writes Order then Invoice, got {chain['models_written']}")
+effect_calls = {e["call"] for e in chain["side_effects"]}
+check("delay" in effect_calls,
+      f"a Celery task three hops away must surface, got {sorted(effect_calls)}")
+check("set" in effect_calls, "the cache write must surface")
+
+first = next(s for s in chain["chain"] if "receiver" in s)
+resolved = [w for w in first["writes"] if w["resolved_model"] == "shop.Order"]
+check(bool(resolved),
+      "instance.order.save() must resolve through the sender's relations")
+check(all(w["method"] != "set" or w["resolved_model"] for s in chain["chain"]
+          if "receiver" in s for w in s.get("writes", [])),
+      "cache.set() is not a model write and must not be reported as one")
+
+delete_chain = what_happens_on("shop.Order", "delete")
+check(delete_chain["receiver_count"] == 1,
+      f"one post_delete receiver on Order, got {delete_chain['receiver_count']}")
+check(not delete_chain["models_written"],
+      f"the delete receiver writes no model, got {delete_chain['models_written']}")
 
 print()
 print("=" * 70)
