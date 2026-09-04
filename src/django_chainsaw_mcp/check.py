@@ -22,7 +22,11 @@ from typing import Any, Callable
 
 from .datetimes import datetime_audit
 from .deploy_safety import deploy_safety
-from .django_env import ensure_django
+from .asyncio_blocking import blocking_in_async
+from .django_env import DjangoBootError, ensure_django
+from .fastapi_exposure import fastapi_exposure
+from .project import get_profile, project_root
+from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .indexes import missing_indexes
 from .bypass import bypassed_effects
 from .concurrency import race_conditions
@@ -224,6 +228,57 @@ def _from_money(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _from_async(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "async", "high",
+            f"{f['call']} blocks the event loop in async {f['function']}()",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("direct", [])
+    ]
+    out += [
+        _finding(
+            "async", "high",
+            f"async {f['function']}() reaches {f['call']}, which blocks the loop",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("reached_through_a_call", [])
+    ]
+    return out
+
+
+def _from_routes(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _finding(
+            "routes", f["severity"],
+            f"{f['method']} {f['path']} returns more than it declares",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+
+
+def _from_sqla(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "sqla", "high",
+            f"{f['model']}.{f['attribute']} is loaded once per row in a loop",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("in_loops", [])
+    ]
+    out += [
+        _finding(
+            "sqla", "high",
+            f"{f['model']}.{f['attribute']} is loaded once per row while serialising",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("in_response_models", [])
+    ]
+    return out
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for entry in report.get("migrations", []):
@@ -256,7 +311,53 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "money": (money_precision, lambda o: {}, _from_money),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
+    "async": (blocking_in_async, lambda o: {}, _from_async),
+    "routes": (fastapi_exposure, lambda o: {}, _from_routes),
+    "sqla": (sqlalchemy_nplusone, lambda o: {}, _from_sqla),
 }
+
+# What each check needs before it can say anything. Running a Django check on a
+# FastAPI project produces a boot error rather than an answer, and running an
+# async check on a project with no async functions produces silence that reads
+# like a clean result. Both are worse than saying the check does not apply.
+_REQUIRES: dict[str, str] = {
+    "deploy-safety": "django",
+    "tenancy": "django",
+    "n+1-serializer": "django",
+    "n+1-template": "django",
+    "serializers": "django",
+    "indexes": "django",
+    "datetimes": "django",
+    "on-commit": "django",
+    "bypass": "django",
+    "races": "django",
+    "money": "django",
+    "open": "django",
+    "migrations": "django",
+    "async": "any",
+    "routes": "fastapi",
+    "sqla": "sqlalchemy",
+}
+
+
+def _applicable(name: str, profile: Any) -> tuple[bool, str]:
+    """Can this check say anything about this project?"""
+    needs = _REQUIRES.get(name, "any")
+    if needs == "any":
+        return True, ""
+    if needs == "django":
+        if profile is None or profile.is_django:
+            return True, ""
+        return False, "no Django in this project"
+    if needs == "fastapi":
+        if profile is None or profile.is_async_web:
+            return True, ""
+        return False, "no FastAPI or Starlette in this project"
+    if needs == "sqlalchemy":
+        if profile is None or profile.uses("sqlalchemy") or profile.uses("sqlmodel"):
+            return True, ""
+        return False, "no SQLAlchemy in this project"
+    return True, ""
 
 ALL_CHECKS = tuple(_CHECKS)
 
@@ -273,7 +374,13 @@ def run_all(
         only: run just these checks.
         skip: run everything except these.
     """
-    ensure_django()
+    # Detecting the frameworks first means a FastAPI project gets the checks
+    # that apply instead of a settings error, and a Django project is
+    # unaffected because everything still applies.
+    try:
+        profile = get_profile(project_root())
+    except Exception:  # noqa: BLE001 - no path configured; fall back to old behaviour
+        profile = None
 
     unknown = set(only or []) | set(skip or [])
     unknown -= set(_CHECKS)
@@ -291,8 +398,26 @@ def run_all(
     options = {"tenant_root": tenant_root}
     findings: list[dict[str, Any]] = []
     ran: dict[str, Any] = {}
+    not_applicable: dict[str, str] = {}
 
+    runnable = []
     for name in selected:
+        applies, reason = _applicable(name, profile)
+        if applies:
+            runnable.append(name)
+        else:
+            not_applicable[name] = reason
+
+    if any(_REQUIRES.get(name) == "django" for name in runnable):
+        try:
+            ensure_django()
+        except DjangoBootError as exc:
+            for name in list(runnable):
+                if _REQUIRES.get(name) == "django":
+                    runnable.remove(name)
+                    not_applicable[name] = f"Django could not be loaded: {exc}"
+
+    for name in runnable:
         fn, build_kwargs, adapt = _CHECKS[name]
         try:
             report = fn(**build_kwargs(options))
@@ -310,6 +435,8 @@ def run_all(
 
     failed = [name for name, state in ran.items() if not state["ok"]]
     return {
+        "frameworks": dict(profile.frameworks) if profile is not None else {},
+        "checks_not_applicable": not_applicable,
         "checks_run": ran,
         "checks_failed": failed,
         "finding_count": len(findings),

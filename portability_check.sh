@@ -65,6 +65,22 @@ else
 fi
 
 echo
+# A shell script that is not executable is a suite that silently does not run.
+# This has happened twice: an editing helper that writes a temp file and
+# renames it does not carry the original mode over, and nothing noticed until
+# a check reported "Permission denied" inside a larger run.
+printf '%s\n' "--- executable bit on every shell script"
+notexec=""
+for script in *.sh; do
+  [ -x "$script" ] || notexec="$notexec $script"
+done
+if [ -n "$notexec" ]; then
+  echo "  FAIL  not executable:$notexec"
+  fails=$((fails + 1))
+else
+  echo "  ok    every .sh is executable"
+fi
+
 if [ "$fails" -gt 0 ]; then
   echo "$fails Portabilitaetsproblem(e)"
   exit 1

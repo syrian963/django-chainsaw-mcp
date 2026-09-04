@@ -1243,3 +1243,21 @@ def test_a_response_model_declaring_no_relationship_is_silent():
     _, responses, _ = _sqla()
     assert not [k for k in responses if k[0] == "list_order_ids"]
     assert not [k for k in responses if k[0] == "list_orders_eager"]
+
+
+def test_the_aggregate_check_runs_everything_on_a_django_project():
+    from django_chainsaw_mcp.check import ALL_CHECKS, run_all
+
+    report = run_all(tenant_root="shop.Customer")
+    assert set(report["checks_run"]) == set(ALL_CHECKS), report["checks_not_applicable"]
+    assert report["checks_not_applicable"] == {}
+
+
+def test_every_check_declares_what_it_needs():
+    # A check missing from _REQUIRES silently defaults to "runs anywhere",
+    # which is how a Django check ends up producing a boot error on a FastAPI
+    # project instead of saying it does not apply.
+    from django_chainsaw_mcp.check import ALL_CHECKS, _REQUIRES
+
+    assert set(_REQUIRES) == set(ALL_CHECKS)
+    assert set(_REQUIRES.values()) <= {"django", "fastapi", "sqlalchemy", "any"}

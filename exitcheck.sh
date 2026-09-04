@@ -37,7 +37,11 @@ expect 1 "check (findings expected)"              $BIN check --tenant-root shop.
 expect 1 "check --fail-on critical (one exists)"  $BIN check --tenant-root shop.Customer --fail-on critical
 # open_endpoints also produces criticals now, so both sources have to be
 # skipped for the aggregate to come back clean.
-expect 0 "check --skip both critical sources"        $BIN check --tenant-root shop.Customer --skip deploy-safety --skip open --fail-on critical
+# Deliberately NOT "skip everything that produces criticals": that list has
+# grown three times and the test broke each time. Selecting one check with
+# no criticals tests the same gate without an exclusivity assumption.
+expect 0 "check --only a check with no criticals"    $BIN check --tenant-root shop.Customer --only datetimes --fail-on critical
+expect 1 "check --only a check that has one"         $BIN check --tenant-root shop.Customer --only deploy-safety --fail-on critical
 expect 0 "check --only datetimes"                 $BIN check --only datetimes --fail-on critical
 expect 0 "n+1-serializer without gate"            $BIN n+1-serializer
 expect 0 "cost without gate"                      $BIN cost

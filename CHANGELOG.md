@@ -5,6 +5,32 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **`check` runs what applies to the project in front of it.** The aggregate
+  command required Django, so everything built for FastAPI was unreachable
+  through the one entry point people actually use. Each check now declares what
+  it needs - Django, FastAPI, SQLAlchemy, or nothing - the project is profiled
+  first, and Django is only booted if a check that needs it was selected. On a
+  FastAPI project that means three checks run and thirteen are reported as not
+  applicable **with the reason**, rather than one boot error; on a Django
+  project every check still runs and nothing is skipped.
+
+### Fixed
+
+- **An atomic file write dropped the executable bit.** Writing to a temp file
+  and renaming is the right way to avoid destroying a file on a failed write,
+  but `os.replace` does not carry the original mode over, so `exitcheck.sh`
+  silently became non-executable and the suite reported "Permission denied"
+  inside a larger run. The mode is preserved now, and `portability_check.sh`
+  fails if any shell script loses it - a script that is not executable is a
+  suite that quietly does not run.
+- **An exit-code test assumed one check was the only source of critical
+  findings**, for the third time: the skip list grew each time a new check
+  produced one. It now selects a single check with no criticals and a single
+  check that has one, which tests the same gate with no exclusivity
+  assumption.
+
 ### Added
 
 - **`sqlalchemy_nplusone`**: relationships SQLAlchemy loads one row at a time.

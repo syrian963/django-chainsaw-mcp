@@ -64,6 +64,12 @@ EXIT_ERROR = 2
 # analyse a FastAPI project for reasons that had nothing to do with the ask.
 _FRAMEWORK_FREE = {"async", "profile", "routes", "sqla"}
 
+# `check` runs whatever applies. On a project with no Django it still has the
+# framework-independent checks to run, so a missing settings module drops
+# those checks rather than the whole command - run_all reports each one it
+# could not run and why.
+_DEGRADES_WITHOUT_DJANGO = {"check"}
+
 
 def _bootstrap(args: argparse.Namespace) -> None:
     if args.project_path:
@@ -77,7 +83,16 @@ def _bootstrap(args: argparse.Namespace) -> None:
         args._project_config = _config.load(project_root())
         return
 
-    config = ensure_django(BootConfig.from_env())
+    if getattr(args, "command", None) in _DEGRADES_WITHOUT_DJANGO:
+        from .project import project_root
+
+        try:
+            config = ensure_django(BootConfig.from_env())
+        except DjangoBootError:
+            args._project_config = _config.load(project_root())
+            return
+    else:
+        config = ensure_django(BootConfig.from_env())
 
     # pyproject.toml supplies what the flags did not. A flag always wins,
     # because "why is it using the wrong tenant root" is a bad afternoon and
@@ -772,12 +787,19 @@ def _cmd_fix(args: argparse.Namespace) -> int:
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    from .django_env import ensure_django
+    from .django_env import DjangoBootError, ensure_django
+    from .project import project_root
 
     report = run_all(tenant_root=args.tenant_root, only=args.only, skip=args.skip)
 
     project = getattr(args, "_project_config", None) or _config.Config()
-    root = Path(ensure_django().project_path)
+    # The root is only used to resolve --since and baseline paths. On a project
+    # with no Django there is still a root, and refusing to report because the
+    # settings module is missing would throw away the checks that did run.
+    try:
+        root = Path(ensure_django().project_path)
+    except DjangoBootError:
+        root = project_root()
 
     if project.ignore:
         kept = [
@@ -867,6 +889,15 @@ def _cmd_check(args: argparse.Namespace) -> int:
         if args.sarif:
             print()
             print(f"SARIF written to {args.sarif}")
+
+    skipped = report.get("checks_not_applicable") or {}
+    if skipped and not args.json:
+        print()
+        frameworks = ", ".join(report.get("frameworks") or {}) or "none detected"
+        print(f"Frameworks found: {frameworks}")
+        print(f"{len(skipped)} check(s) do not apply to this project:")
+        for name, reason in sorted(skipped.items()):
+            print(f"    {name:<16} {reason}")
 
     # A check that could not run is not a pass.
     if report["checks_failed"] and args.strict:
