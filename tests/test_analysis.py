@@ -1148,3 +1148,53 @@ def test_offloading_to_a_thread_is_not_a_finding():
     names |= {f["function"] for f in report["reached_through_a_call"]}
     assert "offloaded" not in names
     assert "via_executor" not in names
+
+
+def _routes():
+    from django_chainsaw_mcp.fastapi_exposure import fastapi_exposure
+
+    report = fastapi_exposure(search_path=_fastapi_root())
+    return {f["endpoint"]: f for f in report["findings"]}, report
+
+
+def test_an_endpoint_with_no_response_model_returning_an_orm_object_is_critical():
+    # The absence of one line is the whole bug: there is nothing in the file
+    # to read or review, and the next column added joins the response.
+    found, _ = _routes()
+    entry = found["leaky_user"]
+    assert entry["kind"] == "no_response_model"
+    assert entry["severity"] == "critical"
+    assert entry["authenticated"] is False
+
+
+def test_the_same_shape_behind_authentication_is_high_not_critical():
+    # It still leaks, to everyone who can log in.
+    found, _ = _routes()
+    assert found["me"]["severity"] == "high"
+    assert found["me"]["authenticated"] is True
+
+
+def test_a_dependency_that_is_not_authentication_does_not_count_as_one():
+    # Depends(get_db) supplies a session, not an identity.
+    found, _ = _routes()
+    assert found["leaky_user"]["authenticated"] is False
+    assert found["leaky_user"]["auth_via"] == []
+
+
+def test_a_declared_model_carrying_a_sensitive_field_is_reported():
+    found, _ = _routes()
+    entry = found["admin_user"]
+    assert entry["kind"] == "sensitive_in_response_model"
+    assert entry["response_model"] == "UserAdminOut"
+    assert "password_hash" in entry["sensitive_fields"]
+    assert "is_superuser" in entry["sensitive_fields"]
+
+
+def test_a_bounded_or_author_written_response_is_silent():
+    found, _ = _routes()
+    # response_model=UserOut, a narrow model
+    assert "safe_user" not in found
+    # FastAPI uses the return annotation the same way
+    assert "annotated_user" not in found
+    # a dict the author wrote is not a leak
+    assert "status" not in found

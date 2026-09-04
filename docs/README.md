@@ -39,6 +39,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`unused_eager_loading`](overfetch.md) | joins and prefetches nothing in the response reads |
 | [`money_precision`](money.md) | decimal amounts that stop being exact |
 | [`blocking_in_async`](async-blocking.md) | synchronous calls that stop the whole event loop |
+| [`fastapi_exposure`](fastapi.md) | endpoints that serialise more than they declare |
 
 ## Understanding it
 
@@ -78,6 +79,7 @@ Every check here answers a question with a consequence attached:
 | Which joins does this pay for and never read? | `unused_eager_loading` |
 | Where does money stop being exact? | `money_precision` |
 | Which call stops the event loop for every request? | `blocking_in_async` |
+| Which endpoint returns every column it was handed? | `fastapi_exposure` |
 | Which datetimes break when the clock moves? | `datetime_audit` |
 | What does the API expose that nobody decided to? | `serializer_exposure` |
 | **All of the above about one model, and the risks only visible combined** | `explain_model` |

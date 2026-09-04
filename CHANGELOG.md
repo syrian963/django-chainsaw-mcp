@@ -7,6 +7,27 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`fastapi_exposure`**: endpoints that serialise more than they declare.
+  With no `response_model` and no return annotation, FastAPI serialises
+  whatever the function returns - the whole ORM object, every column,
+  including the ones added to the model next month. It is the FastAPI shape of
+  `fields = "__all__"`, and worse in one way: a Django serializer at least
+  lists what it exposes somewhere, while here the absence of one line is the
+  entire bug, so there is nothing in the file to read or review.
+
+  Every FastAPI guide says to set `response_model` and several say a CI rule
+  should enforce it; no linter ships one. Severity follows reach:
+  unauthenticated and unbounded is critical, the same behind a dependency is
+  high because it still leaks to everyone who can log in. `Depends(get_db)`
+  does not count as authentication and `Depends(get_current_user)` does.
+
+  An endpoint returning a dict or a literal is silent - the author decided what
+  goes in it - and so is one with a narrow `response_model` or a return
+  annotation. Nothing is imported: a FastAPI app usually wants a database URL
+  and a secret before it will import at all, and none of that is needed to read
+  a decorator, so this runs with no Django configured and no application
+  dependencies installed.
+
 - **`blocking_in_async`, and the framework detection that made it possible.**
   FastAPI runs an `async def` endpoint on the event loop itself and a `def`
   endpoint in a threadpool, so a synchronous call inside `async def` does not

@@ -37,6 +37,7 @@ from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
 from .explain import explain_model as _explain_model
+from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
@@ -409,6 +410,36 @@ def blocking_in_async(
         follow_calls=follow_calls,
         max_depth=max_depth,
     )
+
+
+@mcp.tool()
+def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
+    """FastAPI endpoints that serialise more than they declare.
+
+        @app.get("/users/{pk}")
+        async def get_user(pk: int):
+            return session.get(User, pk)
+
+    No response_model and no return annotation, so FastAPI serialises whatever
+    it is handed - the whole ORM object, every column, including the ones
+    added to the model next month. The absence of one line is the entire bug,
+    so there is nothing in the file to read or review.
+
+    Every FastAPI guide says to set response_model and several say a CI rule
+    should enforce it. No linter ships one.
+
+    An endpoint returning a dict or a literal is not reported: the author
+    decided what goes in it. Unauthenticated is critical, behind a dependency
+    is high - it still leaks to everyone who can log in.
+
+    Nothing here imports the project, because a FastAPI app usually wants a
+    database URL and a secret before it will import at all, and none of that is
+    needed to read a decorator. Needs no Django.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+    return _guard(_fastapi_exposure, search_path=search_path)
 
 
 @mcp.tool()

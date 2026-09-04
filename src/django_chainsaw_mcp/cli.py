@@ -27,6 +27,7 @@ from . import gitdiff as _gitdiff
 from . import sarif as _sarif
 from .asyncio_blocking import blocking_in_async
 from .cascade import delete_impact
+from .fastapi_exposure import fastapi_exposure
 from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
 from .serializer_nplusone import serializer_nplusone
 from . import config as _config
@@ -60,7 +61,7 @@ EXIT_ERROR = 2
 # Commands that read source and nothing else. Booting Django for these turned
 # a question about Python into a question about settings, and refused to
 # analyse a FastAPI project for reasons that had nothing to do with the ask.
-_FRAMEWORK_FREE = {"async", "profile"}
+_FRAMEWORK_FREE = {"async", "profile", "routes"}
 
 
 def _bootstrap(args: argparse.Namespace) -> None:
@@ -591,6 +592,30 @@ def _cmd_async(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_routes(args: argparse.Namespace) -> int:
+    report = fastapi_exposure(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['routes_found']} route(s), {report['models_found']} model(s)")
+        print()
+        if not report["finding_count"]:
+            print("Every route declares what it returns.")
+        for f in report["findings"]:
+            auth = "authenticated" if f["authenticated"] else "no authentication"
+            print(f"  {f['severity'].upper():<9} {f['method']} {f['path']}  "
+                  f"-> {f['endpoint']}()  [{auth}]")
+            print(f"            {f['file']}:{f['line']}")
+            print(f"            {f['why']}")
+            print(f"            fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["critical_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1391,6 +1416,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 if anything blocking runs on the loop")
     p.set_defaults(func=_cmd_async)
+
+    p = sub.add_parser("routes",
+                       help="FastAPI endpoints that serialise more than they declare")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any unauthenticated endpoint with an unbounded response")
+    p.set_defaults(func=_cmd_routes)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

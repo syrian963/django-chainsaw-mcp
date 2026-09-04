@@ -215,6 +215,16 @@ Blocking calls that run on the event loop, directly or reached through a
 project function. Needs no Django, so it works on a FastAPI or Starlette
 project with only `DJANGO_CHAINSAW_PROJECT_PATH` set.
 
+### `routes`
+
+```bash
+django-chainsaw routes [--search-path DIR] [--fail-on-findings]
+```
+
+FastAPI endpoints with no `response_model` and no return annotation, and
+declared models that carry a sensitive field. Unauthenticated is critical,
+behind a dependency is high. Needs no Django.
+
 ### `indexes`
 
 ```bash
