@@ -50,6 +50,7 @@ from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
 from .indexes import missing_indexes
 from .introspect import list_models
+from .impact import impact
 from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .scan import scan_templates
@@ -731,6 +732,46 @@ def _cmd_celery(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_impact(args: argparse.Namespace) -> int:
+    report = impact(
+        search_path=args.search_path,
+        max_depth=args.max_depth,
+        tenant_root=args.tenant_root,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        kinds = ", ".join(f"{n} {k}" for k, n in report["entry_points_by_kind"].items())
+        print(f"{report['entry_points_found']} entry point(s): {kinds or 'none'}")
+        print(f"{report['findings_considered']} finding(s) considered, "
+              f"{report['entry_points_with_findings']} entry point(s) carry one.")
+        print()
+        for entry in report["entry_points"][:args.top]:
+            print(f"  {entry['worst'].upper():<9} {entry['finding_count']:>3}  "
+                  f"{entry['label']}")
+            for finding in entry["findings"][:args.per_entry]:
+                print(f"            {finding['severity']:<9} {finding['check']:<16} "
+                      f"{finding['location']}")
+                if len(finding["through"]) > 1:
+                    hops = " -> ".join(q.rsplit(".", 1)[-1] for q in finding["through"])
+                    print(f"                      via {hops}")
+            extra = entry["finding_count"] - args.per_entry
+            if extra > 0:
+                print(f"            ... and {extra} more")
+            print()
+        print(f"{report['unattributed_count']} finding(s) reached by no entry point "
+              f"this can see, {report['without_a_location_count']} with no file and "
+              "line to attribute.")
+        print()
+        print(report["note"])
+
+    if args.fail_on_findings and any(
+        e["worst"] in ("critical", "high") for e in report["entry_points"]
+    ):
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1613,6 +1654,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any task given the wrong thing")
     p.set_defaults(func=_cmd_celery)
+
+    p = sub.add_parser("impact",
+                       help="findings grouped by the entry points that reach them")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
+    p.add_argument("--max-depth", type=int, default=8, metavar="N",
+                   help="how many callers to walk back through (default: 8)")
+    p.add_argument("--top", type=int, default=20, metavar="N",
+                   help="how many entry points to print (default: 20)")
+    p.add_argument("--per-entry", type=int, default=5, metavar="N",
+                   help="how many findings to print per entry point (default: 5)")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 if any entry point carries a high or critical finding")
+    p.set_defaults(func=_cmd_impact)
 
     p = sub.add_parser("loops", help="database work written inside a loop")
     p.add_argument("--search-path", metavar="DIR")

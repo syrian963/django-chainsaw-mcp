@@ -87,6 +87,7 @@ well as the project path.
 | `money_precision` | **Where a decimal amount stops being exact.** |
 | `celery_arguments` | **What the worker actually receives**, and whether it can even be called. |
 | `queries_in_loops` | Queries written inside a loop, split by which of three fixes applies. |
+| `request_impact` | Every finding grouped by the entry points that reach it, so the question becomes which endpoint to fix. |
 | `open_endpoints` | Sensitive fields on endpoints anybody can call. |
 | `unused_eager_loading` | Joins and prefetches nothing in the response reads. |
 | `check` | Run everything that applies, one severity-sorted list, one exit code. |

@@ -281,6 +281,18 @@ django-chainsaw celery [--search-path DIR] [--fail-on-findings]
 Model instances handed to Celery tasks, and dispatches whose argument count
 cannot match the task. Also in the aggregate `check` as `celery`.
 
+### `impact`
+
+```bash
+django-chainsaw impact [--search-path DIR] [--tenant-root app.Model] [--max-depth N]
+                       [--top N] [--per-entry N] [--fail-on-findings]
+```
+
+Runs the checks, then groups every finding by the entry points that reach it,
+worst first. `--fail-on-findings` gates on "a request can reach something high
+or critical" rather than on the codebase as a whole. Full page:
+[impact.md](impact.md).
+
 ### `loops`
 
 ```bash

@@ -1530,3 +1530,83 @@ def test_the_iterable_of_a_loop_is_not_a_query_inside_it():
     assert not _in(per_row | invariant, "iterable_is_evaluated_once")
     # and the same for a comprehension's outermost iterable
     assert not _in(per_row | invariant, "already_fixed")
+
+
+# --- impact: findings grouped by the entry points that reach them -----------
+
+
+def _impact():
+    from django_chainsaw_mcp.impact import impact
+
+    return impact()
+
+
+def _entry(report, needle):
+    for entry in report["entry_points"]:
+        if needle in entry["entry"]:
+            return entry
+    return None
+
+
+def test_entry_points_are_found_for_every_framework_in_the_fixtures():
+    report = _impact()
+    kinds = report["entry_points_by_kind"]
+    # FastAPI routes, Celery tasks and Django signal receivers all live in the
+    # test projects, and all three are entry points a request can start at.
+    assert kinds.get("http", 0) > 0
+    assert kinds.get("task", 0) > 0
+    assert kinds.get("signal", 0) > 0
+
+
+def test_a_finding_two_calls_below_a_viewset_is_attributed_to_it():
+    # The view calls a service, the service calls a repository, the defect is
+    # in the repository. Nothing about the repository says it serves requests.
+    entry = _entry(_impact(), "OrderReportViewSet.list")
+    assert entry is not None
+    assert entry["finding_count"] >= 1
+    hops = entry["findings"][0]["through"]
+    assert len(hops) > 1, "the path to the finding should name the hops it took"
+    assert hops[0].endswith("OrderReportViewSet.list")
+
+
+def test_a_framework_hook_counts_as_an_entry_point():
+    # Nothing in a project calls get_queryset. Django calls it on every
+    # request, so a finding inside one must not read as unreachable.
+    from django_chainsaw_mcp.callgraph import build
+    from django_chainsaw_mcp.impact import entry_points
+    from django_chainsaw_mcp.project import project_root
+
+    entries = entry_points(build(project_root()))
+    assert any(q.endswith("TenantScopedViewSet.get_queryset") for q in entries)
+
+
+def test_a_private_method_on_a_view_is_not_an_entry_point():
+    # Making one an entry point would stop the backward walk at the helper and
+    # hide the action that actually serves the request.
+    from django_chainsaw_mcp.callgraph import build
+    from django_chainsaw_mcp.impact import entry_points
+    from django_chainsaw_mcp.project import project_root
+
+    entries = entry_points(build(project_root()))
+    assert not any(q.endswith("OrderActionViewSet._internal") for q in entries)
+
+
+def test_unattributed_is_reported_separately_and_not_as_clean():
+    report = _impact()
+    # The fixture helpers are called by nothing, which is the honest answer.
+    assert report["unattributed_count"] > 0
+    assert all("reason" in f for f in report["unattributed"])
+    assert "not that it is safe" in report["note"]
+
+
+def test_a_decorator_written_with_arguments_is_still_recorded():
+    # _dotted returns "" for a Call node, so `@shared_task(bind=True)` used to
+    # record nothing at all and the task was not an entry point.
+    from django_chainsaw_mcp.callgraph import build
+    from django_chainsaw_mcp.project import project_root
+
+    graph = build(project_root())
+    bound = next(
+        fn for name, fn in graph.functions.items() if name.endswith("tasks.retryable")
+    )
+    assert any(d.endswith("shared_task") or d.endswith("task") for d in bound.decorators)

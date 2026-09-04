@@ -310,6 +310,13 @@ def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
                 f"{f['call']} runs inside the loop at line {f['loop_at_line']}",
                 f"{f['file']}:{f['line']}", f["why"], f["fix"],
             ))
+    for f in report.get("through_a_call", []):
+        out.append(_finding(
+            "loops", f["severity"],
+            f"the loop at line {f['loop_at_line']} calls {f['call']}, "
+            f"which queries",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        ))
     return out
 
 

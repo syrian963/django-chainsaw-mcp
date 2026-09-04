@@ -42,6 +42,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`money_precision`](money.md) | decimal amounts that stop being exact |
 | [`celery_arguments`](celery.md) | model instances handed to tasks, and wrong argument counts |
 | [`queries_in_loops`](loop-queries.md) | database work written inside a loop, split by its fix |
+| [`request_impact`](impact.md) | findings grouped by the entry points that reach them |
 | [`blocking_in_async`](async-blocking.md) | synchronous calls that stop the whole event loop |
 | [`fastapi_exposure`](fastapi.md) | endpoints that serialise more than they declare |
 | [`sqlalchemy_nplusone`](sqlalchemy.md) | relationships loaded one row at a time |
@@ -86,6 +87,7 @@ Every check here answers a question with a consequence attached:
 | Where does money stop being exact? | `money_precision` |
 | What does the worker actually receive? | `celery_arguments` |
 | Which loop asks the database the same thing N times? | `queries_in_loops` |
+| I have three hundred findings - where do I start? | `request_impact` |
 | Which call stops the event loop for every request? | `blocking_in_async` |
 | Which endpoint returns every column it was handed? | `fastapi_exposure` |
 | Which relationship loads one row at a time? | `sqlalchemy_nplusone` |

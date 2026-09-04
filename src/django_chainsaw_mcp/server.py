@@ -43,6 +43,7 @@ from .explain import explain_model as _explain_model
 from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
+from .impact import impact as _impact
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .loop_queries import queries_in_loops as _queries_in_loops
@@ -571,6 +572,42 @@ def queries_in_loops(
         _queries_in_loops,
         search_path=search_path,
         include_writes=include_writes,
+    )
+
+
+@mcp.tool()
+def request_impact(
+    search_path: str | None = None,
+    max_depth: int = 8,
+    tenant_root: str = "auth.User",
+) -> dict[str, Any]:
+    """Every finding, grouped by the entry points that actually reach it.
+
+    The other checks answer "where is this defect". A few hundred correct
+    entries sorted by severity still does not say where to start, because risk
+    is severity times how often the code runs and nothing in the list says
+    whether a line is on the path of an endpoint served ten thousand times an
+    hour or of a command last run in 2023.
+
+    This runs the checks, maps each finding to the function containing it, and
+    walks the call graph backwards to the HTTP routes, Celery tasks, signal
+    receivers and management commands that reach it. Each finding carries the
+    path taken to it.
+
+    `unattributed` means no entry point this can see reaches the finding. It
+    does not mean unreachable and it does not mean safe - a plain Django
+    function view carries no decorator and belongs to no view class.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        max_depth: how many callers to walk back through.
+        tenant_root: passed to the ownership check when this runs the checks.
+    """
+    return _guard(
+        _impact,
+        search_path=search_path,
+        max_depth=max_depth,
+        tenant_root=tenant_root,
     )
 
 

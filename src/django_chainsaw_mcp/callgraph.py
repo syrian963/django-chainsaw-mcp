@@ -304,7 +304,14 @@ class _Collector(ast.NodeVisitor):
             line=node.lineno,
             end_line=node.end_lineno or node.lineno,
             class_name=".".join([self.module, *self._class_stack]) if self._class_stack else None,
-            decorators=tuple(_dotted(d) for d in node.decorator_list),
+            # A decorator written with arguments is a Call, and _dotted
+            # returns "" for one. Recording `shared_task` for both
+            # `@shared_task` and `@shared_task(bind=True)` is the only way a
+            # consumer can ask what a function is.
+            decorators=tuple(
+                _dotted(d.func if isinstance(d, ast.Call) else d)
+                for d in node.decorator_list
+            ),
         )
         decorated = any(_is_atomic(d) for d in node.decorator_list)
         fn.opens_atomic = decorated

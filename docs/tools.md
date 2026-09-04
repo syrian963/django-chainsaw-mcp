@@ -595,6 +595,20 @@ Documented in [`celery.md`](celery.md).
 
 ---
 
+## `request_impact`
+
+Every finding, grouped by the entry points - HTTP routes, Celery tasks, signal
+receivers, management commands - that reach it, each with the path taken.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `max_depth` | `8` | how many callers to walk back through |
+| `tenant_root` | `auth.User` | passed on when this runs the checks itself |
+
+`unattributed` means no entry point this can see reaches the finding. It does
+not mean unreachable and it does not mean safe. Full page: [impact.md](impact.md).
+
 ## `queries_in_loops`
 
 Database work written inside a loop, separated into the three shapes that need

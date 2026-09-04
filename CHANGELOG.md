@@ -7,6 +7,28 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`request_impact`: which findings does a request actually hit?** Every other
+  check answers "where is this defect". On a large codebase that is a few
+  hundred correct entries sorted by severity, and nobody knows where to start,
+  because severity ranks the defect and not the risk - a medium on a hot login
+  path outranks a critical in a helper nobody has called since 2021. This maps
+  each finding to the function containing it and walks the call graph
+  **backwards** to the HTTP routes, Celery tasks, signal receivers and
+  management commands that reach it, each with the path taken. Backwards rather
+  than forwards because the walk is then bounded by the findings instead of by
+  the project, and the path falls out for free.
+- **Framework hooks count as entry points.** Nothing in a project calls
+  `get_queryset`; Django calls it on every request. Without that, a finding
+  inside one is reached by no caller and reads as "probably fine". The list is
+  closed rather than "every method on a view class", because making a private
+  helper an entry point would stop the walk at the helper and hide the action
+  that serves the request.
+- `unattributed` findings are reported in their own bucket, named for what it
+  is: not reached by any entry point this can see. Not "dead code", and not
+  "safe" - a plain Django function view carries no decorator and belongs to no
+  view class.
+- New CLI subcommand `impact` and MCP tool `request_impact`.
+
 - **`queries_in_loops` follows calls out of the loop.** A loop whose body
   contains no ORM call at all can still run one query per row, because the query
   is in a function the loop calls. In a codebase organised into services that is
@@ -31,6 +53,15 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   project every check still runs and nothing is skipped.
 
 ### Fixed
+
+- **Decorators written with arguments were recorded as nothing.** `_dotted`
+  returns "" for a `Call` node, so the call graph saw `@shared_task` but not
+  `@shared_task(bind=True)` - and any consumer asking what a function *is* got
+  a blank.
+- **`queries_in_loops` findings from the new `through_a_call` bucket never
+  reached the aggregate.** They were absent from `check`, from the gate, from
+  SARIF and from baselines - the check found them and nothing downstream saw
+  them.
 
 - **The iterable of a loop was treated as being inside it.**
   `for o in Order.objects.all():` evaluates the queryset once, before the first
