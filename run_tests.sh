@@ -24,6 +24,11 @@ suite "smoke_test.py"    uv run python smoke_test.py
 suite "analysis_test.py" uv run python analysis_test.py
 suite "client_test.py"   uv run python client_test.py
 suite "exitcheck.sh"     bash exitcheck.sh
+# Slow: builds a throwaway venv and installs the package into it. Skip with
+# SKIP_INSTALL_CHECK=1 while iterating.
+if [ "${SKIP_INSTALL_CHECK:-0}" != "1" ]; then
+  suite "install_check.sh" bash install_check.sh
+fi
 
 echo
 if [ "$fails" -gt 0 ]; then

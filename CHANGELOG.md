@@ -23,8 +23,17 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   `select_related` / `prefetch_related` that would fix them.
 - **`migration_risk`**: migration operations rated by production impact.
 - **`django://models`** as an MCP resource rather than another tool.
-- Documentation under `docs/`: architecture, tool reference, CLI, and the
+- Documentation under `docs/`: usage, architecture, tool reference, CLI, and the
   reasoning behind `deploy_safety`.
+- **`docs/usage.md`**: how to run this against a real project. The decisive
+  constraint is that `django.setup()` imports your settings and therefore every
+  entry in `INSTALLED_APPS`, so the interpreter needs your project's
+  dependencies. Covers installing into the project venv, keeping it separate,
+  Docker with `docker compose exec -T`, client configuration for Claude Code and
+  JSON-configured clients, and a table mapping each error message to its cause.
+- **`install_check.sh`**: builds a throwaway virtualenv, installs Django and this
+  package into it, then drives both the CLI and the MCP server with that
+  interpreter. The documented install path is verified, not assumed.
 
 ### Fixed
 
@@ -53,6 +62,11 @@ of tooling actually has.
   as project apps, so pointing it at a subdirectory excluded every app and
   returned nothing rather than reporting the migration as clear. App ownership
   now comes from the project path.
+- **The test helper read one spelling of a field that has two.** `_payload` in
+  `client_test.py` used `result.structuredContent`, which works on the SDK build
+  pinned here and raises `AttributeError` on builds that call it
+  `structured_content`. It only surfaced once the package was installed into a
+  different environment, which is the entire reason `install_check.sh` exists.
 - **The package imported `server` eagerly**, which made
   `python -m django_chainsaw_mcp.server` import the module twice and emit a
   `RuntimeWarning`. `main` is resolved lazily through `__getattr__`.

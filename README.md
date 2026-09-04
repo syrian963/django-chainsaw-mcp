@@ -67,19 +67,22 @@ Why and how: [`docs/deploy-safety.md`](docs/deploy-safety.md).
 
 ## Quick start
 
+Install it **into your project's virtualenv**. The server calls
+`django.setup()`, which imports your settings and everything in
+`INSTALLED_APPS`, so the interpreter running it needs your project's
+dependencies:
+
 ```bash
-uv sync
+# inside your project's venv
+pip install -e /path/to/django-chainsaw-mcp
 ```
 
-Point it at a project with two environment variables:
+Point it at the project with two environment variables:
 
 | Variable | Example |
 | --- | --- |
-| `DJANGO_CHAINSAW_PROJECT_PATH` | `/path/to/project` |
+| `DJANGO_CHAINSAW_PROJECT_PATH` | `/srv/app` (the directory settings are importable **from**) |
 | `DJANGO_CHAINSAW_SETTINGS_MODULE` | `myproject.settings` |
-
-Django must be importable from the interpreter that runs it, along with whatever
-the target project's settings import.
 
 ### As a CLI
 
@@ -90,16 +93,22 @@ django-chainsaw delete-impact shop.Customer
 django-chainsaw --json models | jq .
 ```
 
-Exit codes and a CI example: [`docs/cli.md`](docs/cli.md).
+Exit codes and a CI workflow: [`docs/cli.md`](docs/cli.md).
 
 ### As an MCP server
 
 ```bash
 claude mcp add django-chainsaw --scope local \
-  --env DJANGO_CHAINSAW_PROJECT_PATH=/path/to/project \
+  --env DJANGO_CHAINSAW_PROJECT_PATH=/srv/app \
   --env DJANGO_CHAINSAW_SETTINGS_MODULE=myproject.settings \
-  -- uv run --directory /path/to/django-chainsaw-mcp python -m django_chainsaw_mcp.server
+  -- /srv/app/.venv/bin/python -m django_chainsaw_mcp.server
 ```
+
+Then ask it `project_info` first: it is the smallest call that proves both the
+transport and the Django boot.
+
+**Separate environment, Docker, Claude Desktop, other clients, and what the
+error messages mean:** [`docs/usage.md`](docs/usage.md).
 
 ## What the analysis does not know
 
@@ -123,6 +132,7 @@ someone in the wrong direction.
 
 | | |
 | --- | --- |
+| [`docs/usage.md`](docs/usage.md) | **start here**: installing against a real project, clients, Docker, troubleshooting |
 | [`docs/architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
 | [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
 | [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |

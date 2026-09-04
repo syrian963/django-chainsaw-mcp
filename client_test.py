@@ -31,9 +31,17 @@ def _params() -> StdioServerParameters:
 
 
 def _payload(result) -> dict:
-    """Pull the structured result out of a CallToolResult."""
-    if getattr(result, "structuredContent", None):
-        return result.structuredContent
+    """Pull the structured result out of a CallToolResult.
+
+    The attribute is camelCase on some MCP SDK builds and snake_case on others,
+    so both are tried before falling back to parsing the text block. Hardcoding
+    one of them worked here and broke as soon as the package was installed into
+    a different environment.
+    """
+    for attribute in ("structured_content", "structuredContent"):
+        value = getattr(result, attribute, None)
+        if value:
+            return value
     for block in result.content:
         text = getattr(block, "text", None)
         if text:

@@ -35,6 +35,13 @@ jobs:
       - name: CLI exit codes
         run: bash exitcheck.sh
 
+      # Builds a throwaway venv, installs Django and this package into it, and
+      # drives both the CLI and the MCP server with that interpreter. This is
+      # the install path docs/usage.md tells people to use, so it is verified
+      # rather than assumed.
+      - name: Documented install path
+        run: bash install_check.sh
+
   dogfood:
     # The analyser run against its own demo project, which is the closest
     # thing to a real target this repository has.
