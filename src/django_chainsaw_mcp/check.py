@@ -29,6 +29,7 @@ from .project import get_profile, project_root
 from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .indexes import missing_indexes
 from .bypass import bypassed_effects
+from .choices import choice_typos
 from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
 from .celery_tasks import celery_arguments
@@ -311,6 +312,21 @@ def _from_celery(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_choices(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "choices", f["severity"],
+            f"{f['model']}.{f['field']} is never {f['value']!r}",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+    # The untyped comparisons stay out. They rest on an attribute name, and
+    # the object it belongs to may not be a model at all - which is a fine
+    # thing to show somebody looking, and not a thing to fail a build on.
+    return out
+
+
 def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for bucket in ("per_row", "loop_invariant", "writes_in_loops"):
@@ -362,6 +378,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "money": (money_precision, lambda o: {}, _from_money),
     "celery": (celery_arguments, lambda o: {}, _from_celery),
     "loops": (queries_in_loops, lambda o: {}, _from_loops),
+    "choices": (choice_typos, lambda o: {}, _from_choices),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
     "async": (blocking_in_async, lambda o: {}, _from_async),
@@ -387,6 +404,7 @@ _REQUIRES: dict[str, str] = {
     "money": "django",
     "celery": "django",
     "loops": "django",
+    "choices": "django",
     "open": "django",
     "migrations": "django",
     "async": "any",

@@ -1774,3 +1774,99 @@ def test_a_function_nothing_mentions_says_so_plainly():
     # The fixture helpers really are called by nothing, and that is a
     # different answer from "called, receiver unknown".
     assert plain
+
+
+# --- choices: literals a field will never match ----------------------------
+
+
+def _choices():
+    from django_chainsaw_mcp.choices import choice_typos
+
+    report = choice_typos()
+    return report, {f["line"] for f in report["findings"]
+                    if f["file"].endswith("statuses.py")}
+
+
+def _at(name):
+    """The line a fixture function's body starts on, by name."""
+    import ast
+    from pathlib import Path
+
+    from django_chainsaw_mcp.project import project_root
+
+    source = (project_root() / "shop" / "statuses.py").read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return {
+                line for line in
+                (getattr(n, "lineno", None) for n in ast.walk(node))
+                if line is not None
+            }
+    raise AssertionError(f"no fixture named {name}")
+
+
+def test_a_misspelled_choice_in_a_filter_is_found():
+    # Valid Python, valid SQL, zero rows, no exception, wrong forever.
+    _, lines = _choices()
+    assert lines & _at("typo_read")
+
+
+def test_one_wrong_value_inside_a_list_is_found():
+    _, lines = _choices()
+    assert lines & _at("typo_in_a_list")
+
+
+def test_a_write_is_found_and_says_why_it_is_worse():
+    # create() never calls full_clean(), so the value reaches the column.
+    report, lines = _choices()
+    assert lines & _at("typo_write")
+    written = [f for f in report["findings"] if f["method"] in {"create", "update", "__init__"}]
+    assert written
+    assert "full_clean" in written[0]["why"]
+
+
+def test_a_model_constructed_directly_is_checked():
+    _, lines = _choices()
+    assert lines & _at("constructed_directly")
+
+
+def test_the_correct_spelling_is_silent():
+    _, lines = _choices()
+    for name in ("correct_read", "correct_in_a_list"):
+        assert not (lines & _at(name)), name
+
+
+def test_referencing_the_choice_by_name_is_silent():
+    # Order.Status.CANCELED cannot be misspelled without an AttributeError.
+    _, lines = _choices()
+    assert not (lines & _at("by_reference"))
+
+
+def test_iexact_is_left_alone():
+    # A case-insensitive lookup can legitimately match a differently spelled
+    # literal, so a difference is not evidence of a typo.
+    _, lines = _choices()
+    assert not (lines & _at("case_insensitive_is_left_alone"))
+
+
+def test_a_comparison_that_names_no_model_is_silent():
+    # Measured at five false positives out of five on a real codebase: every
+    # one was an attribute on an object that was not a model.
+    _, lines = _choices()
+    assert not (lines & _at("a_comparison_names_no_model"))
+
+
+def test_a_string_literal_against_an_integer_field_is_not_a_typo():
+    # Django coerces the value to the field's type, so filter(x="1") on an
+    # IntegerField whose choices are 1 and 2 is correct code.
+    from django_chainsaw_mcp.choices import _literals
+    import ast
+
+    assert _literals(ast.parse("'1'", mode="eval").body) == ["1"]
+    # and the check compares string forms, which is what runtime does
+    from django_chainsaw_mcp.choices import choice_typos
+
+    assert all(
+        str(f["value"]) not in {str(a) for a in f["allowed"]}
+        for f in choice_typos()["findings"]
+    )

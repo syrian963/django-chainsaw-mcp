@@ -43,6 +43,7 @@ from .explain import explain_model as _explain_model
 from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
+from .choices import choice_typos as _choice_typos
 from .impact import impact as _impact
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
@@ -608,6 +609,41 @@ def request_impact(
         search_path=search_path,
         max_depth=max_depth,
         tenant_root=tenant_root,
+    )
+
+
+@mcp.tool()
+def choice_typos(
+    search_path: str | None = None,
+    include_tests: bool = True,
+) -> dict[str, Any]:
+    """Literals compared against a field whose `choices` will never match them.
+
+        STATUS = [("canceled", "Canceled"), ...]
+        Order.objects.filter(status="cancelled")
+
+    Two Ls. Valid Python, valid SQL, zero rows, no exception, wrong forever.
+    Nothing in Django objects: `choices` is checked by `full_clean()`, which a
+    queryset never calls and `create()` never calls either - so the write side
+    is worse, and puts a value in the column the application does not believe
+    exists.
+
+    No existing tool finds this: django-stubs types the field as `str` rather
+    than a Literal union of its choices, so mypy is satisfied, and the DJ rules
+    do not read the model registry.
+
+    Only literals are checked - an enum member is the spelling that cannot go
+    wrong - and only equality and `in`, because `iexact` can legitimately match
+    a differently spelled value. `order.status == "..."` names no model, so it
+    is reported only when the literal is wrong for every model with a field of
+    that name.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        include_tests: also scan test files.
+    """
+    return _guard(
+        _choice_typos, search_path=search_path, include_tests=include_tests
     )
 
 

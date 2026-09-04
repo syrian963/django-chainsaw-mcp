@@ -7,6 +7,19 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`choice_typos`: literals a field's `choices` will never match.**
+  `Order.objects.filter(status="cancelled")` where the choices spell it with
+  one L is valid Python, valid SQL, returns zero rows, raises nothing and is
+  wrong forever - and an empty result reads exactly like "no orders are
+  cancelled". The write side is worse: `choices` is enforced by `full_clean()`,
+  which neither a queryset nor `create()` ever calls, so the value goes into
+  the column and the application holds a state it does not believe exists.
+  Nothing else finds this - django-stubs types the field as `str` rather than a
+  Literal union of its choices, so mypy is satisfied, and the `DJ` rules never
+  read the model registry.
+- New CLI subcommand `choices`, MCP tool `choice_typos`, and `choices` in the
+  aggregate check.
+
 - **A nested serializer is attributed through its parent.** It is a field in a
   class body - inside no function at all - so neither the backward walk nor the
   method-body route could see it. The chain nested -> parent -> the view

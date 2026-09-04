@@ -41,10 +41,22 @@ class Customer(models.Model):
 
 
 class Order(models.Model):
+    class Status(models.TextChoices):
+        # One L. Every literal in the codebase has to agree with this, and
+        # nothing but a reader checks that it does.
+        CANCELED = "canceled", "Canceled"
+        SHIPPED = "shipped", "Shipped"
+        PENDING = "pending", "Pending"
+        DRAFT = "draft", "Draft"
+        PLACED = "placed", "Placed"
+
     customer = models.ForeignKey(
         Customer,
         on_delete=models.CASCADE,
         related_name="orders",
+    )
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING
     )
     placed_at = models.DateTimeField(auto_now_add=True)
 
@@ -125,3 +137,10 @@ class Shipment(AuditedMixin):
 
     order = models.ForeignKey("Order", on_delete=models.CASCADE, related_name="shipments")
     tracking = models.CharField(max_length=64, blank=True, default="")
+    # A second model with a `status` field, and a different set of values.
+    # An untyped `x.status == "..."` has to be wrong for both to be reported.
+    status = models.CharField(
+        max_length=16,
+        choices=[("in_transit", "In transit"), ("delivered", "Delivered")],
+        default="in_transit",
+    )

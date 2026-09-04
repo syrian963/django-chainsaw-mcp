@@ -595,6 +595,20 @@ Documented in [`celery.md`](celery.md).
 
 ---
 
+## `choice_typos`
+
+Literals compared against a field whose `choices` do not contain them.
+`filter(status="cancelled")` where the choices spell it with one L is valid
+SQL, returns zero rows and raises nothing.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_tests` | `true` | also scan test files |
+
+Only expressions that name a model, and only literals. Full page:
+[choices.md](choices.md).
+
 ## `request_impact`
 
 Every finding, grouped by the entry points - HTTP routes, Celery tasks, signal

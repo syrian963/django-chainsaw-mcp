@@ -50,6 +50,7 @@ from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
 from .indexes import missing_indexes
 from .introspect import list_models
+from .choices import choice_typos
 from .impact import impact
 from .loop_queries import queries_in_loops
 from .migrations import migration_risk
@@ -728,6 +729,184 @@ def _cmd_celery(args: argparse.Namespace) -> int:
             print(f"         {f['code']}")
             print(f"         {f['why']}")
             print(f"         fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_choices(args: argparse.Namespace) -> int:
+    report = choice_typos(
+        search_path=args.search_path,
+        include_tests=not args.skip_tests,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"Every literal matches its field's choices "
+                  f"({report['literals_checked']} checked across "
+                  f"{report['fields_with_choices']} field(s)).")
+        for finding in report["findings"]:
+            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
+                  f"  {finding['model']}.{finding['field']}")
+            print(f"            {finding['code']}")
+            print(f"            {finding['why']}")
+            print(f"            fix: {finding['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_routes(args: argparse.Namespace) -> int:
+    report = fastapi_exposure(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['routes_found']} route(s), {report['models_found']} model(s)")
+        print()
+        if not report["finding_count"]:
+            print("Every route declares what it returns.")
+        for f in report["findings"]:
+            auth = "authenticated" if f["authenticated"] else "no authentication"
+            print(f"  {f['severity'].upper():<9} {f['method']} {f['path']}  "
+                  f"-> {f['endpoint']}()  [{auth}]")
+            print(f"            {f['file']}:{f['line']}")
+            print(f"            {f['why']}")
+            print(f"            fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["critical_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_sqla(args: argparse.Namespace) -> int:
+    report = sqlalchemy_nplusone(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['relationship_count']} relationship(s) across "
+              f"{report['models_with_relationships']} model(s)")
+        print()
+        if not report["finding_count"]:
+            print("No relationship is loaded one row at a time.")
+        if report["in_loops"]:
+            print(f"{report['in_loop_count']} in a loop:")
+            print()
+            for f in report["in_loops"]:
+                print(f"  HIGH   {f['file']}:{f['line']}  in {f['function']}()")
+                print(f"         {f['code']}")
+                print(f"         {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        if report["in_response_models"]:
+            print(f"{report['in_response_model_count']} during response serialisation:")
+            print()
+            for f in report["in_response_models"]:
+                print(f"  HIGH   {f['file']}:{f['line']}  in {f['function']}()")
+                print(f"         {f['response_model']} -> {f['model']}.{f['attribute']}")
+                print(f"         {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_amplification(args: argparse.Namespace) -> int:
+    report = amplification(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['open_endpoints_considered']} endpoint(s) reachable without "
+              "credentials were considered")
+        print()
+        if not report["finding_count"]:
+            print("None of them is expensive enough to be worth abusing.")
+        for f in report["findings"]:
+            cost = (f"~{f['estimated_queries']} queries" if f.get("estimated_queries")
+                    else ", ".join(f.get("relationships_per_row", [])) + " per row")
+            print(f"  {f['severity'].upper():<9} {f['endpoint']}  ({cost})")
+            if f.get("location"):
+                print(f"            {f['location']}")
+            print(f"            {f['why']}")
+            print(f"            fix: {f['fix']}")
+            print()
+        if report["checks_that_could_not_run"]:
+            print("Half of this question could not be answered:")
+            for problem in report["checks_that_could_not_run"]:
+                print(f"    {problem}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["critical_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_celery(args: argparse.Namespace) -> int:
+    report = celery_arguments(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['tasks_found']} task(s), {report['dispatches_checked']} dispatch(es) "
+              "resolved to one of them")
+        print()
+        if not report["finding_count"]:
+            print("Every dispatch passes what its task asked for.")
+        for f in report["instance_arguments"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  {f['task']}({f['parameter']})")
+            print(f"         {f['code']}")
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        for f in report["arity_mismatches"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  {f['task']} given {f['given']}, "
+                  f"expects {f['expects']}")
+            print(f"         {f['code']}")
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_choices(args: argparse.Namespace) -> int:
+    report = choice_typos(
+        search_path=args.search_path,
+        include_tests=not args.skip_tests,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"Every literal matches its field's choices "
+                  f"({report['literals_checked']} checked across "
+                  f"{report['fields_with_choices']} field(s)).")
+        for finding in report["findings"]:
+            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
+                  f"  {finding['model']}.{finding['field']}")
+            print(f"            {finding['code']}")
+            print(f"            {finding['why']}")
+            print(f"            fix: {finding['fix']}")
+            print()
+        for finding in report["untyped_comparisons"]:
+            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
+                  f"  .{finding['field']} (model unknown)")
+            print(f"            {finding['code']}")
+            print(f"            {finding['why']}")
             print()
         print(report["note"])
 
@@ -1661,6 +1840,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any task given the wrong thing")
     p.set_defaults(func=_cmd_celery)
+
+    p = sub.add_parser("choices",
+                       help="literals a field's choices will never match")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--skip-tests", action="store_true",
+                   help="do not scan test files")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any literal that cannot match")
+    p.set_defaults(func=_cmd_choices)
 
     p = sub.add_parser("impact",
                        help="findings grouped by the entry points that reach them")

@@ -281,6 +281,15 @@ django-chainsaw celery [--search-path DIR] [--fail-on-findings]
 Model instances handed to Celery tasks, and dispatches whose argument count
 cannot match the task. Also in the aggregate `check` as `celery`.
 
+### `choices`
+
+```bash
+django-chainsaw choices [--search-path DIR] [--skip-tests] [--fail-on-findings]
+```
+
+Literals a field's `choices` will never match, in lookups and in writes. Also
+in the aggregate `check` as `choices`. Full page: [choices.md](choices.md).
+
 ### `impact`
 
 ```bash
