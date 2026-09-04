@@ -183,6 +183,16 @@ Public endpoints whose serializer exposes a sensitive field (critical) or every
 field via `__all__`/`exclude` (medium). `--fail-on-findings` exits `1` on any
 critical. Also in the aggregate `check` as `open`.
 
+### The names `--only` and `--skip` accept
+
+`deploy-safety`, `tenancy`, `n+1-serializer`, `n+1-template`, `serializers`,
+`indexes`, `datetimes`, `on-commit`, `bypass`, `races`, `money`, `open`,
+`migrations`, `async`, `routes`, `sqla`.
+
+`check` runs the ones that apply to the project in front of it and reports the
+rest as not applicable, with the reason, so an unfamiliar project does not need
+this list to get a useful answer.
+
 ### `overfetch`
 
 ```bash
@@ -243,6 +253,24 @@ django-chainsaw amplification [--search-path DIR] [--fail-on-findings]
 Endpoints that are both reachable without credentials and expensive to answer,
 or public and unpaginated. Works on Django (DRF views) and FastAPI. Neither
 half is a finding alone.
+
+### `profile`
+
+```bash
+django-chainsaw profile [--search-path DIR]
+```
+
+What the project is built on, counted from its own imports. Needs no Django,
+so it is the first thing to run against an unfamiliar project.
+
+### `explain`
+
+```bash
+django-chainsaw explain app_label.ModelName
+```
+
+Everything about one model, including the risks only visible when its fields,
+relations and migrations are read together.
 
 ### `indexes`
 

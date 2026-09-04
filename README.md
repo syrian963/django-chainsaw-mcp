@@ -1,7 +1,7 @@
 # django-chainsaw-mcp
 
-An MCP server and CLI that **analyses** a Django project rather than describing
-it.
+An MCP server and CLI that **analyses** a Python web project rather than
+describing it.
 
 Several Django MCP servers already exist. They answer *what exists*: list the
 models, dump the schema, run the ORM, read the settings. None of the ones I
@@ -13,9 +13,16 @@ looked at answer *what will hurt*:
   during a rolling deploy,
 - whether a destructive migration is safe to ship **yet**,
 - which queries read tenant-scoped rows without scoping the query,
-- and what a single `save()` actually sets off, three hops away.
+- what a single `save()` actually sets off, three hops away,
+- which endpoint a stranger can use to make the database do three thousand
+  queries.
 
 Everything is read-only, and most of it never touches the database.
+
+**On the name.** It started as a Django tool and Django is still where most of
+it lives — thirteen of the checks need the app registry. The rest need only
+Python, and several are FastAPI-specific. Renaming the repository would break
+every link to it, so the name stays and this paragraph does the work instead.
 
 ## One command to try it
 
@@ -51,6 +58,11 @@ Five minutes end to end: **[docs/quickstart.md](docs/quickstart.md)**.
 
 ## Tools
 
+### Django projects
+
+These read the app registry, so they need `DJANGO_CHAINSAW_SETTINGS_MODULE` as
+well as the project path.
+
 | Tool | Answers |
 | --- | --- |
 | `project_info` | Does the target project load at all? Run this first when something is broken. |
@@ -67,13 +79,62 @@ Five minutes end to end: **[docs/quickstart.md](docs/quickstart.md)**.
 | `serializer_exposure` | What DRF serializers expose, including what the next migration will add. |
 | `serializer_nplusone` | N+1 in DRF serializers, which is where it lives in an API project. |
 | `explain_model` | **Everything about one model, plus the risks only visible combined.** |
-| `check` | Run them all, one severity-sorted list, one exit code. |
+| `endpoint_cost` | How many queries one request costs, before anybody sends one. |
+| `api_contract` / `api_contract_check` | What this branch changes about the API, and who it breaks. |
+| `escaping_side_effects` | Mail and tasks fired inside a transaction that can still roll back. |
+| `bypassed_effects` | Bulk writes that skip everything the `save()` chain promised. |
+| `race_conditions` | Counters read into Python, changed, and saved. Also unsafe upserts. |
+| `money_precision` | **Where a decimal amount stops being exact.** |
+| `open_endpoints` | Sensitive fields on endpoints anybody can call. |
+| `unused_eager_loading` | Joins and prefetches nothing in the response reads. |
+| `check` | Run everything that applies, one severity-sorted list, one exit code. |
 | `suggest_fixes` | **Findings turned into code, grouped by how safe each one is to apply.** |
+
+### Any Python project
+
+These need no Django, and no settings module — point
+`DJANGO_CHAINSAW_PROJECT_PATH` at the directory and go:
+
+| Tool | Answers |
+| --- | --- |
+| `project_profile` | What is this built on? Counted from the project's own imports. |
+| `blocking_in_async` | **Which synchronous call stops the event loop for every request?** |
+| `fastapi_exposure` | Endpoints that serialise more than they declare. |
+| `sqlalchemy_nplusone` | Relationships loaded one row at a time, including during serialisation. |
+| `amplification` | **Which endpoint can a stranger use to exhaust the database?** |
 
 Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
 
 Full reference: [`docs/tools.md`](docs/tools.md).
+
+## Beyond Django
+
+`check` profiles the project first and runs what applies, so the same command
+works either way:
+
+```bash
+DJANGO_CHAINSAW_PROJECT_PATH=/path/to/api django-chainsaw check
+```
+
+```
+15 finding(s): 8 critical, 7 high
+Ran 3 check(s): async, routes, sqla
+
+Frameworks found: sqlalchemy, requests, fastapi, httpx, pydantic
+13 check(s) do not apply to this project:
+    bypass           no Django in this project
+    datetimes        no Django in this project
+    ...
+```
+
+Saying **"does not apply, and here is why"** is the point. Silence would read
+exactly like a clean result.
+
+Nothing about the FastAPI support imports the project. An app that wants a
+database URL and a secret before it will import is not an app this can boot,
+and none of that is needed to read a decorator — so those checks run on a
+checkout with no dependencies installed at all.
 
 ## The one worth reading about
 

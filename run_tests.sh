@@ -21,6 +21,7 @@ suite() {
 }
 
 suite "portability_check.sh" bash portability_check.sh
+suite "docs_check.sh"      bash docs_check.sh
 suite "pytest"           uv run pytest
 suite "smoke_test.py"    uv run python smoke_test.py
 suite "analysis_test.py" uv run python analysis_test.py

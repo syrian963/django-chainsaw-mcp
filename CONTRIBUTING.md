@@ -37,7 +37,12 @@ Run all four before committing. They are fast.
    ends stay thin: `server.py` and `cli.py` should contain argument handling and
    printing, nothing else. That separation is why the CLI took an afternoon.
 
-2. **Call `ensure_django()` first.** It is idempotent and thread-safe.
+2. **Call `ensure_django()` only if the tool needs the app registry.** Reading
+   models, migrations or signals does; reading Python source does not, and
+   making it boot anyway is how a tool ends up refusing to analyse a FastAPI
+   project for reasons that have nothing to do with the question asked. Use
+   `project.resolve_root()` for the second kind, and add the tool to
+   `check._REQUIRES` so the aggregate knows what it needs.
 
 3. **Raise `ValueError` for caller mistakes.** `_guard` in `server.py` turns
    those into `{"ok": false, "error": ...}` so a typo does not kill the server.
@@ -50,6 +55,21 @@ Run all four before committing. They are fast.
 5. **Write the failing test first.** Every bug in the README was found by a test
    that asserted a *specific* number or shape, not by one that checked the call
    did not raise.
+
+6. **Add its row to the README and `docs/tools.md`.** `docs_check.sh` fails
+   otherwise, and it will tell you exactly what is missing.
+
+## Documentation is checked the way the code is
+
+`docs_check.sh` fails if a tool has no line in the README, a subcommand has no
+section in the CLI reference, a check name cannot be looked up anywhere, or a
+page under `docs/` is not linked from the index.
+
+This exists because the repository shipped for several iterations describing
+itself as a Django tool while a third of its checks no longer needed Django. A
+README that describes a scope the code has outgrown is worse than one that says
+nothing: somebody with a FastAPI project reads the first paragraph and leaves.
+The check found four separate pieces of drift the first time it ran.
 
 ## Test style
 

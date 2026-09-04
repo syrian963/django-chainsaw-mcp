@@ -45,6 +45,9 @@ jobs:
       - name: API contract lifecycle
         run: bash contract_check.sh
 
+      - name: Documentation covers the code
+        run: bash docs_check.sh
+
       - name: Call graph
         run: bash callgraph_check.sh
 

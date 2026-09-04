@@ -459,6 +459,122 @@ Documented in [`money.md`](money.md).
 
 ---
 
+## `project_profile`
+
+What the project is built on, counted from its own imports rather than from
+what is installed. Needs no Django.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+---
+
+## `explain_model`
+
+Everything about one model in one answer: fields, relations, what a delete
+takes with it, the migrations that touch it, and the risks that are only
+visible when those are put side by side.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `model_label` | required | `app_label.ModelName` |
+
+---
+
+## `serializer_nplusone`
+
+DRF serializer fields that cross a relation the view did not prefetch,
+following nested serializers to full paths like `lines__product__category`.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `include_safe` | `false` | also list serializers with nothing to fix |
+
+---
+
+## `blocking_in_async`
+
+Synchronous calls that run on the event loop, directly or reached through a
+project function. Needs no Django.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `follow_calls` | `true` | also report blocking reached through a call |
+| `max_depth` | `3` | how many calls deep to follow |
+
+Documented in [`async-blocking.md`](async-blocking.md).
+
+---
+
+## `fastapi_exposure`
+
+FastAPI endpoints with no `response_model` and no return annotation, and
+declared models carrying a sensitive field. Needs no Django.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+Documented in [`fastapi.md`](fastapi.md).
+
+---
+
+## `sqlalchemy_nplusone`
+
+Relationships SQLAlchemy loads one row at a time: in a loop, and during
+response serialisation where there is no loop to see. Needs no Django.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+Documented in [`sqlalchemy.md`](sqlalchemy.md).
+
+---
+
+## `amplification`
+
+Endpoints that are both reachable without credentials and expensive to answer.
+Neither half is a finding alone.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+Documented in [`amplification.md`](amplification.md).
+
+---
+
+## `check`
+
+Every check that applies to this project, merged into one severity-sorted
+list. The project is profiled first, so a FastAPI project gets the checks that
+apply rather than a Django boot error, and what does not apply is reported
+with the reason.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `tenant_root` | `auth.User` | the model that owns data, for the ownership check |
+| `only` | all | run just these checks |
+| `skip` | none | run everything except these |
+
+---
+
+## `suggest_fixes`
+
+Findings turned into code, grouped by how safe each one is to apply:
+mechanical, generated, advisory.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `tenant_root` | `auth.User` | the model that owns data |
+
+Documented in [`fixes.md`](fixes.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

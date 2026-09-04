@@ -33,6 +33,24 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`docs_check.sh`**: the documentation is checked the way the code is. It
+  fails if a tool has no line in the README, a subcommand has no section in the
+  CLI reference, an aggregate check name cannot be looked up anywhere, or a
+  page under `docs/` is not linked from the index. It found four separate
+  pieces of drift on its first run: nine tools missing from the reference, two
+  subcommands with no section, one check name nobody could look up, and two
+  orphaned pages.
+
+### Changed
+
+- **The README no longer claims to be a Django tool.** It described a scope the
+  code had outgrown for several iterations, which is worse than saying nothing:
+  somebody with a FastAPI project reads the first paragraph and leaves. The
+  tools are now split into the ones that need the Django app registry and the
+  ones that need only Python, `check` is shown profiling a FastAPI project, and
+  the name is addressed rather than left to look like an oversight - it stays
+  because renaming the repository would break every link to it.
+
 - **`amplification`**: endpoints that are both reachable without credentials
   and expensive to answer. Two facts, each of which is somebody else's finding
   and neither of which is wrong alone - `GET /orders` has no authentication,

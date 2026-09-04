@@ -18,6 +18,8 @@ Start at the row that matches what you are trying to do.
 | [Tool reference](tools.md) | every MCP tool, its arguments and its output |
 | [Suggestions and fixes](fixes.md) | findings as real code, and which are safe to apply |
 | [Baselines](baseline.md) | adopting this on a codebase that already has findings |
+| [Configuration](configuration.md) | `pyproject.toml` settings, and suppressions that need a reason |
+| [Performance](performance.md) | what each check costs, and the cache that makes a full run bearable |
 
 ## The checks, in depth
 
