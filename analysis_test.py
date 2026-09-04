@@ -8,6 +8,7 @@ os.environ.setdefault("DJANGO_CHAINSAW_PROJECT_PATH", "testprojects")
 os.environ.setdefault("DJANGO_CHAINSAW_SETTINGS_MODULE", "demoshop.settings")
 
 from django_chainsaw_mcp.cascade import delete_impact  # noqa: E402
+from django_chainsaw_mcp.deploy_safety import deploy_safety  # noqa: E402
 from django_chainsaw_mcp.migrations import migration_risk  # noqa: E402
 from django_chainsaw_mcp.nplusone import analyse_template  # noqa: E402
 
@@ -106,6 +107,46 @@ for entry in risk["migrations"]:
     for op in entry["operations"]:
         if op["risk"] != "safe":
             print("      {:<16} {:<22} {}".format(op["operation"], op["risk"], op["detail"][:60]))
+
+print()
+print("=" * 70)
+print("deploy_safety")
+print("=" * 70)
+full = deploy_safety()
+print("project apps:", full["project_apps"], "| third-party skipped:", full["skipped_third_party_apps"])
+print("blocking:", full["blocking_count"], "| clear:", full["clear_count"])
+for entry in full["blocking"]:
+    print("  BLOCKING {}.{} {} {!r} (confidence {})".format(
+        entry["app"], entry["migration"], entry["operation"], entry["symbol"], entry["confidence"]))
+    for ref in entry["references"]:
+        print("       {}:{}  [{}]".format(ref["path"], ref["line"], ref["kind"]))
+
+check(full["blocking_count"] == 1, "the pending RemoveField must be reported as blocking")
+check(
+    "contenttypes" in full["skipped_third_party_apps"],
+    "third-party migrations must be skipped, they generated the false positives",
+)
+check(
+    full["project_apps"] == ["shop"],
+    f"only shop is a project app, got {full['project_apps']}",
+)
+
+if full["blocking"]:
+    refs = full["blocking"][0]["references"]
+    kinds = {r["kind"] for r in refs}
+    lines = {r["line"] for r in refs}
+    check(
+        {"attribute access", "string field name", "keyword argument"} <= kinds,
+        f"all reference shapes must be found, got {sorted(kinds)}",
+    )
+    check(3 not in lines, "line 3 is inside the module docstring and must not count")
+    check(len(refs) == 4, f"expected exactly the 4 real references, got {len(refs)}")
+
+# Narrowing the scan must flip the verdict, not empty the analysis.
+narrow = deploy_safety(search_path=str(ROOT / "testprojects/demoshop"))
+print("narrowed scan -> blocking:", narrow["blocking_count"], "| clear:", narrow["clear_count"])
+check(narrow["clear_count"] == 1, "with no references in scope the migration must be clear")
+check(narrow["blocking_count"] == 0, "narrowed scan must not report blocking")
 
 print()
 print("=" * 70)

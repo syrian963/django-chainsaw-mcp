@@ -17,6 +17,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from .cascade import delete_impact as _delete_impact
+from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
@@ -103,6 +104,24 @@ def find_n_plus_one(template_path: str, root_models: dict[str, str]) -> dict[str
             {"orders": "shop.Order"}. Loop variables inherit from these.
     """
     return _guard(_analyse_template, template_path=template_path, root_models=root_models)
+
+
+@mcp.tool()
+def deploy_safety(search_path: str | None = None, max_hits_per_symbol: int = 25) -> dict[str, Any]:
+    """Is a pending destructive migration safe to deploy yet?
+
+    A migration linter says RemoveField is backward incompatible, always. This
+    answers the question that actually decides the deploy: has the code caught
+    up? For every unapplied migration that removes or renames a field, model,
+    index or constraint, the source tree is searched for code that still refers
+    to it, and each one comes back either "blocking" with file and line numbers,
+    or "clear".
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project path.
+        max_hits_per_symbol: stop after this many references per symbol.
+    """
+    return _guard(_deploy_safety, search_path=search_path, max_hits_per_symbol=max_hits_per_symbol)
 
 
 @mcp.tool()
