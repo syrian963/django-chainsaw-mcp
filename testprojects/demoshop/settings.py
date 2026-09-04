@@ -33,5 +33,10 @@ TEMPLATES = [
     }
 ]
 
+# Some views exist nowhere but here. A plain function view carries no
+# decorator and belongs to no class, so the URLconf is the only thing that
+# knows it serves requests.
+ROOT_URLCONF = "demoshop.urls"
+
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

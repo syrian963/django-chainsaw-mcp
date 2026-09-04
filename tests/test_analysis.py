@@ -1640,3 +1640,80 @@ def test_a_serializer_no_view_declares_stays_unattributed():
     # It is still in the contract and still a finding. It is simply not on the
     # path of any request this can see, and saying otherwise would be a guess.
     assert any(f["check"] == "n+1-serializer" for f in report["unattributed"])
+
+
+# --- impact: the URLconf, and serializers built in a method body ------------
+
+
+def test_a_plain_function_view_is_found_through_the_urlconf():
+    # No decorator, no view class. Nothing in its source says it serves HTTP,
+    # so without reading the URLconf its defects are reached by nothing.
+    entry = _entry(_impact(), "service_layer.daily_report")
+    assert entry is not None
+    assert entry["finding_count"] >= 1
+    assert entry["url"] == "/reports/daily/"
+
+
+def test_an_entry_point_carries_the_url_it_is_served_at():
+    report = _impact()
+    assert report["entry_points_from_the_urlconf"] > 0
+    routed = [e for e in report["entry_points"] if e.get("url")]
+    assert routed
+    assert all(e["label"].startswith(e["url"]) for e in routed)
+
+
+def test_a_private_method_on_a_routed_viewset_is_still_not_an_entry_point():
+    # The URLconf names the class, which is not a licence to promote every
+    # method on it: the backward walk would stop at the helper and hide the
+    # action that actually serves the request.
+    from django_chainsaw_mcp.callgraph import build
+    from django_chainsaw_mcp.impact import entry_points
+    from django_chainsaw_mcp.project import project_root
+
+    entries = entry_points(build(project_root()))
+    assert any(q.endswith("OrderActionViewSet.create") for q in entries)
+    assert not any(q.endswith("OrderActionViewSet._internal") for q in entries)
+
+
+def test_a_serializer_built_in_a_method_body_is_attributed_to_that_view():
+    # DRF's declarative serializer_class is one way to serve a serializer and
+    # not the common one: a plain APIView builds it in the body, and there is
+    # no attribute for anything to read.
+    report = _impact()
+    assert report["classes_built_inside_a_function"] > 0
+    entry = _entry(report, "ManualReportView.get")
+    assert entry is not None
+    assert any(f["check"] == "n+1-serializer" for f in entry["findings"])
+
+
+def test_an_empty_serializer_map_says_whether_it_could_not_look():
+    # An empty map and a map that could not be built look identical from the
+    # outside, and one means "nothing to attribute" while the other means
+    # "could not look".
+    assert "serializer_map_error" in _impact()
+
+
+def test_the_call_graph_is_built_once_per_unchanged_tree():
+    from django_chainsaw_mcp import callgraph
+    from django_chainsaw_mcp.project import project_root
+
+    root = project_root()
+    callgraph.clear_cache()
+    first = callgraph.build(root)
+    assert callgraph.build(root) is first
+    assert callgraph.build(root, refresh=True) is not first
+
+
+def test_an_edited_file_invalidates_the_cached_graph(tmp_path):
+    from django_chainsaw_mcp import callgraph
+
+    source = tmp_path / "m.py"
+    source.write_text("def a():\n    pass\n")
+    callgraph.clear_cache()
+    before = callgraph.build(tmp_path)
+    assert any(q.endswith(".a") for q in before.functions)
+
+    (tmp_path / "n.py").write_text("def b():\n    pass\n")
+    after = callgraph.build(tmp_path)
+    assert after is not before
+    assert any(q.endswith(".b") for q in after.functions)

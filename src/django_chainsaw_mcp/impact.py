@@ -44,11 +44,12 @@ incomplete one.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
 from .callgraph import CallGraph, Function, build
-from .project import resolve_root
+from .project import TreeCache, resolve_root
 
 # Decorator suffixes that make a function an entry point, and what kind.
 _TASK_DECORATORS = {"shared_task", "periodic_task", "task"}
@@ -127,17 +128,96 @@ def _classify(graph: CallGraph, fn: Function) -> tuple[str, str] | None:
     return None
 
 
+def _routed(graph: CallGraph) -> dict[str, dict[str, Any]]:
+    """What the URLconf says, which is the only place some views are named.
+
+    A plain function view carries no decorator and belongs to no class.
+    Nothing in its source says it serves requests, so a check that reads only
+    the source reports every defect on its path as reached by nothing - which
+    is the one wrong answer this whole file exists to avoid.
+
+    The URLconf also supplies the URL, and "GET /orders/<id>/confirm/" is a
+    better thing to hand somebody than a dotted Python path.
+    """
+    try:
+        from django.urls import get_resolver
+    except Exception:  # noqa: BLE001 - not a Django project
+        return {}
+
+    try:
+        resolver = get_resolver()
+        patterns = resolver.url_patterns
+    except Exception:  # noqa: BLE001 - no ROOT_URLCONF, or it does not import
+        return {}
+
+    found: dict[str, dict[str, Any]] = {}
+
+    def label_for(callback: Any) -> str | None:
+        holder = getattr(callback, "view_class", None) or getattr(callback, "cls", None)
+        target = holder if holder is not None else callback
+        module = getattr(target, "__module__", None)
+        name = getattr(target, "__qualname__", None)
+        if not module or not name:
+            return None
+        return f"{module}.{name}"
+
+    def walk(entries: Any, prefix: str, depth: int) -> None:
+        if depth > 20:
+            return
+        for entry in entries:
+            route = f"{prefix}{entry.pattern}"
+            nested = getattr(entry, "url_patterns", None)
+            if nested is not None:
+                walk(nested, route, depth + 1)
+                continue
+            dotted = label_for(getattr(entry, "callback", None))
+            if dotted is None:
+                continue
+            # Router patterns are regexes. `^reports/$` is the same URL as
+            # `/reports/` and only one of them is worth showing a human.
+            plain = route.replace("^", "").replace("$", "").replace(r"\.", ".")
+            url = plain if plain.startswith("/") else f"/{plain}"
+            if dotted in graph.functions:
+                found.setdefault(dotted, {"url": url, "target": dotted})
+            else:
+                # A class: every entry-point method on it serves this URL.
+                for qualname in graph.functions:
+                    if qualname.startswith(f"{dotted}."):
+                        found.setdefault(qualname, {"url": url, "target": dotted})
+                found.setdefault(dotted, {"url": url, "target": dotted})
+
+    try:
+        walk(patterns, "", 0)
+    except Exception:  # noqa: BLE001 - a URLconf that raises is not a crash here
+        return found
+    return found
+
+
 def entry_points(graph: CallGraph) -> dict[str, dict[str, Any]]:
     """Every function the outside world can start executing at."""
+    routed = _routed(graph)
     found: dict[str, dict[str, Any]] = {}
     for qualname, fn in graph.functions.items():
         verdict = _classify(graph, fn)
+        url = routed.get(qualname, {}).get("url")
         if verdict is None:
-            continue
+            # A URL that names this function directly is a plain function
+            # view: nothing else in the source marks it, and the URLconf is
+            # the only thing that knows.
+            #
+            # A URL that names the *class* is not a licence to promote every
+            # method on it. `_internal` on a routed ViewSet would become an
+            # entry point, the backward walk would stop there, and the action
+            # that actually serves the request would be hidden - which is why
+            # the hook list is closed in the first place.
+            if routed.get(qualname, {}).get("target") != qualname:
+                continue
+            verdict = ("http", f"{qualname} (routed)")
         kind, label = verdict
         found[qualname] = {
             "kind": kind,
-            "label": label,
+            "label": f"{url} -> {label}" if url else label,
+            "url": url,
             "file": fn.file,
             "line": fn.line,
         }
@@ -208,7 +288,54 @@ def _reaching(
     return hits
 
 
-def _serializer_map(root: Path) -> dict[str, list[str]]:
+def _serializer_uses(
+    graph: CallGraph, root: Path, wanted: set[str]
+) -> dict[str, list[str]]:
+    """Serializer class -> the functions whose body names it.
+
+    DRF's declarative `serializer_class` is one way to serve a serializer and
+    not the common one on a large codebase: a plain `APIView` builds the
+    serializer in the method body, and there is no attribute to read. That
+    left every serializer finding on such a project unattributed - 161 of
+    them, the largest single group.
+
+    The name in the body is resolved through the module's own imports, which
+    the call graph already records, so `Foo` in two modules meaning two
+    different classes stays two different classes. A bare-name match would
+    have been much easier and would have attributed findings to the wrong
+    endpoint, which is the failure mode this whole file is built to avoid.
+    """
+    if not wanted:
+        return {}
+
+    short: dict[str, set[str]] = {}
+    for qualname in wanted:
+        short.setdefault(qualname.rsplit(".", 1)[-1], set()).add(qualname)
+
+    trees = TreeCache(root)
+    uses: dict[str, list[str]] = {}
+    for qualname, fn in graph.functions.items():
+        node = trees.function(fn)
+        if node is None:
+            continue
+        imports = graph.imports.get(fn.module, {})
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                name = child.id
+            elif isinstance(child, ast.Attribute):
+                name = child.attr
+            else:
+                continue
+            candidates = short.get(name)
+            if not candidates:
+                continue
+            resolved = imports.get(name) or f"{fn.module}.{name}"
+            if resolved in candidates:
+                uses.setdefault(resolved, []).append(qualname)
+    return {key: sorted(set(value)) for key, value in uses.items()}
+
+
+def _serializer_map(root: Path) -> tuple[dict[str, list[str]], str | None]:
     """Serializer class -> the views that declare it, or {} if DRF is absent.
 
     A serializer field is not inside any function, so the backward walk has
@@ -220,9 +347,13 @@ def _serializer_map(root: Path) -> dict[str, list[str]]:
     try:
         from .discovery import serializers_used_by_views
 
-        return serializers_used_by_views(root)
-    except Exception:  # noqa: BLE001 - no DRF, or no settings; not an error here
-        return {}
+        return serializers_used_by_views(root), None
+    except Exception as exc:  # noqa: BLE001 - no DRF, or no settings
+        # An empty map and a map that could not be built look identical from
+        # the outside, and one of them means "nothing to attribute" while the
+        # other means "could not look". Saying which is the difference between
+        # a result and a guess.
+        return {}, f"{type(exc).__name__}: {exc}"
 
 
 def _entries_on(entries: dict[str, dict[str, Any]], view: str) -> list[str]:
@@ -266,7 +397,15 @@ def impact(
     entries = entry_points(graph)
     reverse = _callers(graph)
     index = _by_file(graph)
-    serving = _serializer_map(root)
+    serving, serving_error = _serializer_map(root)
+    owners = {
+        graph.class_at(*where)
+        for where in (
+            _location(f) for f in report.get("findings", [])
+        )
+        if where is not None
+    }
+    uses = _serializer_uses(graph, root, {o for o in owners if o})
 
     by_entry: dict[str, dict[str, Any]] = {}
     declarative: dict[str, dict[str, Any]] = {}
@@ -286,6 +425,11 @@ def impact(
         if holder is None:
             hits = {}
             owner = graph.class_at(relative, line)
+            # A function that builds the serializer itself is a caller like any
+            # other, so the ordinary backward walk applies from there.
+            for user in uses.get(owner or "", ()):
+                for entry, path in _reaching(reverse, user, entries, max_depth).items():
+                    hits.setdefault(entry, [*path, owner])
             for view in serving.get(owner or "", ()):
                 for entry in _entries_on(entries, view):
                     hits[entry] = [entry, owner]
@@ -357,7 +501,12 @@ def impact(
 
     return {
         "entry_points_found": len(entries),
-        "serializers_attributed_to_views": len(serving),
+        "entry_points_from_the_urlconf": sum(
+            1 for meta in entries.values() if meta.get("url")
+        ),
+        "serializers_declared_by_a_view": len(serving),
+        "serializer_map_error": serving_error,
+        "classes_built_inside_a_function": len(uses),
         "entry_points_by_kind": dict(sorted(kinds.items())),
         "entry_points_with_findings": len(ranked),
         "entry_points": ranked,
@@ -372,9 +521,11 @@ def impact(
             "Walked backwards from each finding through the call graph, at "
             f"most {max_depth} callers deep. `unattributed` means no entry "
             "point this can see reaches the finding - not that it is "
-            "unreachable, and not that it is safe: a plain Django function "
-            "view carries no decorator and belongs to no view class, so "
-            "nothing in the source marks it as an entry point. Findings "
+            "unreachable, and not that it is safe. On a Django project the "
+            "URLconf is read, so plain function views are found; without one "
+            "- a non-Django project, or a settings module that could not be "
+            "loaded - a view with no decorator and no view class is invisible "
+            "and its findings land there. Findings "
             "with no file and line, such as a migration or a serializer "
             "class, are counted separately and cannot be attributed at all."
         ),

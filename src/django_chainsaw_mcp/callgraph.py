@@ -454,7 +454,64 @@ def _resolve_one(
     return None
 
 
-def build(root: Path) -> CallGraph:
+# One graph per tree, reused across checks in the same process.
+#
+# Seven analyses build a call graph, and `check` runs all of them: on a project
+# of 2100 files that is seven full parses of the same unchanged source, and it
+# dominated the runtime of every aggregate command. The graph is pure a
+# function of the files, so building it more than once buys nothing.
+_cache: dict[str, tuple[tuple[int, float, int], CallGraph]] = {}
+
+
+def _fingerprint(root: Path) -> tuple[int, float, int]:
+    """How many files, how recent, how large - enough to notice an edit.
+
+    Stat-only, so it costs a fraction of a parse. The newest mtime alone is
+    not enough: an edit within the same clock tick that leaves the length
+    unchanged is exactly the case that bit this project once already, through
+    Python's own bytecode cache. The total size catches the ordinary version
+    of that, and `refresh=True` is there for the rest.
+    """
+    count = 0
+    newest = 0.0
+    total = 0
+    for path in root.rglob("*.py"):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        count += 1
+        total += info.st_size
+        newest = max(newest, info.st_mtime)
+    return (count, newest, total)
+
+
+def clear_cache() -> None:
+    """Forget every cached graph. For tests, and for a long-lived server."""
+    _cache.clear()
+
+
+def build(root: Path, *, refresh: bool = False) -> CallGraph:
+    """The call graph for `root`, built once and reused while the files match.
+
+    Args:
+        root: the tree to read.
+        refresh: rebuild even if the fingerprint is unchanged.
+    """
+    key = str(root)
+    mark = _fingerprint(root)
+    if not refresh:
+        cached = _cache.get(key)
+        if cached is not None and cached[0] == mark:
+            return cached[1]
+    graph = _build(root)
+    _cache[key] = (mark, graph)
+    return graph
+
+
+def _build(root: Path) -> CallGraph:
     """Read every Python file under `root` and link the calls up."""
     graph = CallGraph(functions={}, imports={}, bases={}, class_module={})
 

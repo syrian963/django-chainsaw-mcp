@@ -7,6 +7,22 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`request_impact` reads the URLconf.** A plain Django function view carries
+  no decorator and belongs to no view class, so nothing in its source says it
+  serves HTTP and every defect on its path was reported as reached by nothing.
+  The URLconf also supplies the URL, so an entry point is now labelled
+  `/reports/daily/` rather than with a dotted Python path. A URL that names a
+  class does **not** promote every method on it: `_internal` on a routed
+  ViewSet would stop the backward walk and hide the action that serves the
+  request.
+- **Serializers built inside a method body are attributed.** DRF's declarative
+  `serializer_class` is one route and not the common one on a large codebase -
+  a plain `APIView` builds the serializer in the body, where there is no
+  attribute to read. The functions naming the class are found instead, with the
+  name resolved through the module's own imports so that `Foo` in two modules
+  stays two classes. On a large real project this took serializer findings from
+  161 unattributed to 79, and the endpoints carrying a finding from 153 to 224.
+
 - **Serializer findings are attributed through the view that declares them.**
   An N+1 in a serializer is a field on a class, with no enclosing function for
   the backward walk to start from, so every one of them landed in
@@ -52,6 +68,13 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The call graph is built once per tree instead of once per check.** Seven
+  analyses build one, and `check` runs all of them: on a project of 2100 files
+  that was seven full parses of the same unchanged source. A stat-only
+  fingerprint - file count, newest mtime, total size - decides whether the
+  cached graph still matches, `refresh=True` forces a rebuild and
+  `clear_cache()` empties it.
+
 - **`check` runs what applies to the project in front of it.** The aggregate
   command required Django, so everything built for FastAPI was unreachable
   through the one entry point people actually use. Each check now declares what
@@ -62,6 +85,10 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   project every check still runs and nothing is skipped.
 
 ### Fixed
+
+- **An empty serializer-to-view map could not be told from one that failed to
+  build.** One means "nothing to attribute" and the other means "could not
+  look"; the exception was being swallowed. The reason is now reported.
 
 - **A serializer finding pointed at a bare filename.** `serializers.py:16` is
   ambiguous the moment a project has two of them, which every project of any

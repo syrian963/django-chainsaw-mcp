@@ -37,6 +37,32 @@ Three files, one request. The defect is in `decorate`; nothing about `decorate`
 says it is on the path of an HTTP request, and nothing about the viewset says
 it queries. Only the chain between them does.
 
+## The URLconf knows things the source does not
+
+A plain Django function view carries no decorator and belongs to no class:
+
+```python
+def daily_report(request):
+    return Response(...)
+```
+
+Nothing in that source says it serves HTTP. On a Django project the URLconf is
+read, so it is found anyway - and it supplies the URL, which is a better thing
+to hand somebody than a dotted Python path:
+
+```
+  HIGH        1  /reports/daily/ -> shop.service_layer.daily_report (routed)
+            high      loops            shop/service_layer.py:20
+                      the loop at line 20 calls customer_for, which queries
+                      via daily_report -> decorate
+```
+
+A URL that names a **class** is not a licence to promote every method on it.
+`_internal` on a routed ViewSet would become an entry point, the backward walk
+would stop there, and the action that serves the request would be hidden -
+which is the same reason the hook list below is closed. Only a URL naming a
+function directly creates an entry point that the source did not already.
+
 ## Framework hooks are entry points too
 
 Nothing in a project calls `get_queryset`. Django calls it, on every request.
@@ -68,6 +94,22 @@ serializer-to-view map and attributed to the views that declare it:
                       via ProductViewSet -> ProductSerializer
 ```
 
+`serializer_class` is DRF's declarative route and not the common one on a
+large codebase. A plain `APIView` builds the serializer in the method body:
+
+```python
+class ManualReportView(APIView):
+    def get(self, request):
+        return Response(ManualOrderSerializer(Order.objects.all(), many=True).data)
+```
+
+There is no attribute for anything to read - only the name in the code. So the
+functions whose body names the class are found too, and from there the ordinary
+backward walk applies. The name is resolved through the module's own imports,
+which the call graph already records, so `Foo` meaning two different classes in
+two modules stays two different classes; a bare-name match would have been far
+easier and would have attributed findings to the wrong endpoint.
+
 A ViewSet that declares `serializer_class` and overrides nothing is still an
 endpoint. There is no method to point at, so the class is named instead, which
 is the honest answer rather than a missing one.
@@ -88,9 +130,9 @@ and the path falls out of the walk for free.
 It does not mean unreachable, and it does not mean safe. It means **no entry
 point this can see reaches the finding**, and the two ordinary reasons are:
 
-- A plain Django function view wired up in a URLconf. It carries no decorator
-  and belongs to no view class, so nothing in the source marks it as an entry
-  point. Its findings land here.
+- A project with no URLconf to read - a non-Django project, or a settings
+  module that could not be loaded. There, a view with no decorator and no view
+  class is invisible, and its findings land here. With a URLconf, they do not.
 - A call the graph could not resolve — a callable passed as an argument, a
   method looked up by name, a `getattr`.
 
@@ -113,6 +155,14 @@ nine hops from the nearest view is not attributed, and says so.
 `--fail-on-findings` exits 1 when any entry point carries a high or critical
 finding — a gate on "something a request can reach" rather than on the
 codebase as a whole.
+
+## Cost
+
+Seven analyses build a call graph, and this runs all of them, so the same
+unchanged source used to be parsed seven times. The graph is now built once per
+tree and reused while a stat-only fingerprint - file count, newest mtime, total
+size - stays the same. `callgraph.build(root, refresh=True)` forces a rebuild,
+and `clear_cache()` empties it, which a long-lived server wants after an edit.
 
 ## Limits
 
