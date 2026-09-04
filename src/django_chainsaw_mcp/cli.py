@@ -18,6 +18,7 @@ import os
 import sys
 from typing import Any
 
+from . import baseline as _baseline
 from .cascade import delete_impact
 from .deploy_safety import deploy_safety
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
@@ -43,6 +44,56 @@ def _bootstrap(args: argparse.Namespace) -> None:
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
+
+
+def _apply_baseline(check: str, report: dict[str, Any], args: argparse.Namespace) -> int | None:
+    """Handle --baseline and --update-baseline for one check.
+
+    Returns an exit code when the baseline decided the outcome, or None when
+    the caller should fall back to its own gate.
+    """
+    path = getattr(args, "baseline", None)
+    update = getattr(args, "update_baseline", False)
+
+    if update:
+        written = _baseline.write(path or _baseline.DEFAULT_BASELINE, check, report)
+        print()
+        print(f"Baseline written to {written['baseline']}: "
+              f"{written['recorded']} finding(s) recorded for '{check}'.")
+        print("Commit it. From now on the gate fails on new findings only.")
+        return EXIT_OK
+
+    if not path:
+        return None
+
+    diff = _baseline.compare(check, report, _baseline.load(path))
+    print()
+    if not diff["has_baseline"]:
+        print(f"No baseline recorded for '{check}' in {path}.")
+        print(f"Run again with --update-baseline to record today's "
+              f"{diff['new_count']} finding(s).")
+        return EXIT_OK
+
+    print(f"Against {path} (recorded {diff['baseline_recorded_at']}): "
+          f"{diff['new_count']} new, {diff['unchanged_count']} known, "
+          f"{diff['fixed_count']} fixed")
+
+    if diff["fixed"]:
+        print()
+        print("Fixed since the baseline, regenerate it to lock this in:")
+        for entry in diff["fixed"][:20]:
+            print(f"  - {entry['file']}  {entry['summary']}")
+
+    if diff["new"]:
+        print()
+        print("NEW findings, not in the baseline:")
+        for entry in diff["new"]:
+            location = f"{entry['file']}:{entry['line']}" if entry.get("line") else entry["file"]
+            print(f"  {entry['severity']:<7} {location}")
+            print(f"          {entry['summary']}")
+        return EXIT_FINDINGS
+
+    return EXIT_OK
 
 
 def _cmd_signals(args: argparse.Namespace) -> int:
@@ -107,6 +158,10 @@ def _cmd_tenancy(args: argparse.Namespace) -> int:
         print(f"{report['unscoped_count']} candidate(s), "
               f"{report['high_severity_count']} at one hop from the owner")
 
+    decided = _apply_baseline("tenancy", report, args)
+    if decided is not None:
+        return decided
+
     if args.fail_on_findings and report["unscoped_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
@@ -136,6 +191,10 @@ def _cmd_deploy_safety(args: argparse.Namespace) -> int:
                 print(f"              {ref['path']}:{ref['line']}  [{ref['kind']}]")
         print()
         print(f"{report['blocking_count']} blocking, {report['clear_count']} clear")
+
+    decided = _apply_baseline("deploy-safety", report, args)
+    if decided is not None:
+        return decided
 
     return EXIT_FINDINGS if report["blocking_count"] else EXIT_OK
 
@@ -178,6 +237,10 @@ def _cmd_nplusone(args: argparse.Namespace) -> int:
                 print(f"      -> .{'.'.join(parts)}")
             print()
         print(f"{report['high_severity_total']} high severity candidate(s)")
+
+    decided = _apply_baseline("n+1", report, args)
+    if decided is not None:
+        return decided
 
     if args.max_high is not None and report["high_severity_total"] > args.max_high:
         return EXIT_FINDINGS
@@ -295,6 +358,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--app", help="restrict to one app label")
     p.add_argument("--short", action="store_true", help="omit field details")
     p.set_defaults(func=_cmd_models)
+
+    for name in ("deploy-safety", "n+1", "tenancy"):
+        target = sub.choices[name]
+        target.add_argument(
+            "--baseline", nargs="?", const=_baseline.DEFAULT_BASELINE, metavar="FILE",
+            help="compare against a recorded baseline and fail on new findings only "
+                 f"(default file: {_baseline.DEFAULT_BASELINE})")
+        target.add_argument(
+            "--update-baseline", action="store_true",
+            help="record today's findings as the baseline and exit 0")
 
     return parser
 

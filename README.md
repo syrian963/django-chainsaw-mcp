@@ -119,6 +119,29 @@ This is also the other half of `delete_impact`, which walks `on_delete` and says
 in its own output that it ignores signals. Details:
 [`docs/signals.md`](docs/signals.md).
 
+## Making it survive a real codebase
+
+Point `tenancy` at a five year old project and it returns two hundred
+candidates. Nobody reads two hundred candidates: the gate goes in, the build
+turns red, somebody adds `continue-on-error`, and the tool runs forever with
+nobody looking. That is the same failure mode this project criticises migration
+linters for.
+
+So `tenancy`, `n+1` and `deploy-safety` support a baseline:
+
+```bash
+django-chainsaw tenancy --baseline --update-baseline   # once, record today
+django-chainsaw tenancy --baseline                     # from then on, in CI
+```
+
+The existing findings stay in the report and stop blocking. Anything **new**
+fails the build. Fixing an old one is reported so the file can be regenerated,
+which means the number only ever goes down.
+
+Findings are fingerprinted on file plus identity, never the line, so adding an
+import does not resurrect twenty findings nobody touched.
+[`docs/baseline.md`](docs/baseline.md).
+
 ## Quick start
 
 Install it **into your project's virtualenv**. The server calls
@@ -193,6 +216,7 @@ someone in the wrong direction.
 | [`docs/tenancy.md`](docs/tenancy.md) | the IDOR shape, and why the model graph makes it checkable |
 | [`docs/signals.md`](docs/signals.md) | tracing the signal chain, and the other half of `delete_impact` |
 | [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
+| [`docs/baseline.md`](docs/baseline.md) | ratcheting, so these tools survive contact with a legacy codebase |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
 | [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |
 

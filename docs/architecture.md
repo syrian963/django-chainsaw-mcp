@@ -150,6 +150,7 @@ src/django_chainsaw_mcp/
     tenancy.py        ownership paths, unscoped queryset detection
     signals.py        signal chain tracing through receiver bodies
     server.py         MCP tools and resource
+    baseline.py       fingerprinting, ratcheting against a recorded state
     cli.py            subcommands and exit codes
 testprojects/         throwaway Django project used by the tests
 ```

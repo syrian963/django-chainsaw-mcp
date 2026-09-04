@@ -15,6 +15,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   template context from class-based views that declare `template_name` with
   `model` or `queryset`. `find_n_plus_one` needs a context map typed by hand,
   which is fine from an assistant and useless in CI.
+- **Baselines** for `tenancy`, `n+1` and `deploy-safety`, through `--baseline`
+  and `--update-baseline`. Every analyser here has the same adoption problem: on
+  an old codebase it returns hundreds of candidates, the gate gets switched off
+  in the first week, and then it runs forever with nobody looking. A baseline
+  records what is already there so the gate fails on new findings only, reports
+  fixed ones so the file can be regenerated, and therefore only ever counts
+  down. Findings are fingerprinted on file plus identity and never on the line
+  number, so adding an import does not resurrect findings nobody touched.
 - **`what_happens_on`**: follows the signal chain a save or delete sets off,
   through receiver bodies and into the signals those writes fire in turn.
   Receivers come from the live registry; their bodies are read with the AST.
@@ -100,6 +108,11 @@ of tooling actually has.
   authorisation problem. Inserting a row cannot leak anybody's data, and the bug
   class is unauthorised reads. Chains ending in a pure write are skipped;
   `get_or_create` and `update_or_create` still count, because they read first.
+
+- **An empty baseline file was treated as corruption.** `mktemp` and `touch`
+  both produce one, and `json.loads("")` raised, so the command exited 2 with a
+  message about unreadable JSON when the honest answer was that no baseline had
+  been recorded yet.
 
 ### Changed
 

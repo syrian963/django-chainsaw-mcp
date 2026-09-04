@@ -17,6 +17,8 @@ uv run python smoke_test.py      # introspection functions, called directly
 uv run python analysis_test.py   # the analysis tools, with assertions
 uv run python client_test.py     # the server over the real MCP transport
 bash exitcheck.sh                # CLI exit codes
+bash baseline_check.sh           # the baseline lifecycle end to end
+bash install_check.sh            # the documented install path, in a fresh venv
 ```
 
 `client_test.py` is the one that matters most. The others call Python functions,

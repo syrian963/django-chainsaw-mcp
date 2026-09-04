@@ -130,22 +130,42 @@ jobs:
       - name: Deploy safety
         run: uv run django-chainsaw deploy-safety
 
-      # A ratchet, not a wall. Lower the number as the codebase improves.
+      # A ratchet: fails only on N+1 candidates that are not in the baseline.
       - name: N+1 budget
-        run: uv run django-chainsaw n+1 --max-high 12
+        run: uv run django-chainsaw n+1 --baseline
+
+      # Same for tenant scoping, which is far too noisy to gate without one.
+      - name: Tenant scoping
+        run: uv run django-chainsaw tenancy --tenant-root shop.Customer --baseline
 
       # Reporting only, never fails the build.
       - name: Migration risk
         run: uv run django-chainsaw migrations
 
-      # Turn on --fail-on-findings once the existing list is triaged.
-      - name: Tenant scoping
-        run: uv run django-chainsaw tenancy --tenant-root shop.Customer
+
 ```
 
 `deploy-safety` needs no database: it reads migration files and source code. If
 a database is reachable it also knows which migrations are already applied and
 skips them, which makes the result tighter but is not required.
+
+## Baselines
+
+`deploy-safety`, `n+1` and `tenancy` accept two more flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--baseline [FILE]` | compare against a recorded baseline, fail on new findings only. Defaults to `.django-chainsaw-baseline.json` |
+| `--update-baseline` | record today's findings and exit `0` |
+
+```bash
+django-chainsaw tenancy --baseline --update-baseline
+django-chainsaw tenancy --baseline
+```
+
+With a baseline the command exits `1` only when something **new** appears, so
+`--fail-on-findings` and `--max-high` are not needed alongside it. Full
+reasoning in [`baseline.md`](baseline.md).
 
 ## Piping
 
