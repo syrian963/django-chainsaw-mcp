@@ -125,7 +125,7 @@ def load_serializer_modules(root: Path) -> dict[str, Any]:
     return result
 
 
-def serializers_used_by_views() -> dict[str, list[str]]:
+def serializers_used_by_views(root: Path | None = None) -> dict[str, list[str]]:
     """Which views name which serializer, so far as it is declared.
 
     A serializer no view uses is still in the contract, and removing it is then
@@ -138,6 +138,12 @@ def serializers_used_by_views() -> dict[str, list[str]]:
         from rest_framework.serializers import BaseSerializer
     except ModuleNotFoundError:
         return {}
+
+    # Views the URLconf never reached are not in __subclasses__() either, and
+    # without them every serializer looks unserved - which is the one wrong
+    # answer this field must never give.
+    if root is not None:
+        load_view_modules(root)
 
     used: dict[str, list[str]] = {}
     seen: set[int] = set()
@@ -162,7 +168,7 @@ def serializers_used_by_views() -> dict[str, list[str]]:
     return used
 
 
-def dynamic_serializer_views() -> list[str]:
+def dynamic_serializer_views(root: Path | None = None) -> list[str]:
     """Views that choose their serializer at runtime.
 
     Their serializers cannot be attributed statically, so any "nothing serves
@@ -172,6 +178,9 @@ def dynamic_serializer_views() -> list[str]:
         from rest_framework.generics import GenericAPIView
     except ModuleNotFoundError:
         return []
+
+    if root is not None:
+        load_view_modules(root)
 
     out: list[str] = []
     seen: set[int] = set()
@@ -188,3 +197,66 @@ def dynamic_serializer_views() -> list[str]:
 
     walk(GenericAPIView)
     return sorted(out)
+
+
+_loaded_views: dict[str, dict[str, Any]] = {}
+
+
+_VIEW_HINTS = ("View", "ViewSet")
+
+_loaded_views: dict[str, dict[str, Any]] = {}
+
+
+def _module_name(path: Path, root: Path) -> str:
+    parts = list(path.relative_to(root).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
+
+
+def load_view_modules(root: Path) -> dict[str, Any]:
+    """Import every module declaring a View subclass.
+
+    The same reason `load_serializer_modules` exists, and the same failure:
+    a view no URLconf reaches in this environment is not in
+    `__subclasses__()`. On a real project this made `endpoint_cost` report
+    zero endpoints and `api_contract` call every serializer unserved -
+    both silently, both looking like clean results.
+    """
+    key = str(root)
+    if key in _loaded_views:
+        return _loaded_views[key]
+
+    import sys
+
+    imported: list[str] = []
+    failed: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        declares = any(
+            isinstance(node, ast.ClassDef)
+            and any(
+                (base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", ""))
+                .endswith(_VIEW_HINTS)
+                for base in node.bases
+            )
+            for node in ast.walk(tree)
+        )
+        if not declares:
+            continue
+        module = _module_name(path, root)
+        if not module or module in sys.modules:
+            continue
+        try:
+            importlib.import_module(module)
+            imported.append(module)
+        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+            failed.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})
+
+    _loaded_views[key] = {"imported": imported, "failed": failed}
+    return _loaded_views[key]

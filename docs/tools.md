@@ -389,8 +389,10 @@ Documented in [`bypass.md`](bypass.md).
 ## `race_conditions`
 
 Read-modify-save races — a field read into Python, changed, and saved, so two
-concurrent requests overwrite each other — and `select_for_update()` calls with
-no transaction to hold the lock, which raise on evaluation.
+concurrent requests overwrite each other; `select_for_update()` calls with no
+transaction to hold the lock, which raise on evaluation; and `get_or_create` /
+`update_or_create` upserts whose lookup no unique constraint covers, which
+create duplicates under load.
 
 | Argument | Default | Meaning |
 | --- | --- | --- |

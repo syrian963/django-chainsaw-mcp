@@ -258,7 +258,10 @@ def race_conditions(search_path: str | None = None, include_parameters: bool = T
     those are silent here. Counters, balances, stock, retry counts: the
     fields where off-by-one costs money.
 
-    Also: select_for_update() with no atomic() around it, which is not a race
+    Also: get_or_create() on a lookup no unique field, unique_together or
+    UniqueConstraint covers - two requests miss the get together, both
+    create, and the next call raises MultipleObjectsReturned. And
+    select_for_update() with no atomic() around it, which is not a race
     but a TransactionManagementError the first time the line is reached.
     Whether a transaction is open is judged with the call graph, so a caller's
     atomic(), a decorator and ATOMIC_REQUESTS on a view all count.

@@ -183,6 +183,14 @@ def _from_races(report: dict[str, Any]) -> list[dict[str, Any]]:
     out += [
         _finding(
             "races", "high",
+            f"{f['model']}.{f['method']}({', '.join(f['lookup'])}) has no unique constraint behind it",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("unsafe_upserts", [])
+    ]
+    out += [
+        _finding(
+            "races", "high",
             "select_for_update() with no transaction to hold the lock",
             f"{f['file']}:{f['line']}", f["why"], f["fix"],
         )

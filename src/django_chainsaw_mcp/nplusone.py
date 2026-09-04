@@ -152,6 +152,28 @@ def _walk(
                 _walk(child, scope, in_loop, findings)
 
 
+def _project_engine() -> Any:
+    """The engine the project actually renders with.
+
+    A bare `Engine()` has no `libraries` and no `DIRS`, so the first
+    `{% load app_tags %}` raises TemplateSyntaxError and the first
+    `{% extends %}` cannot find its parent. Every project of any size has a
+    custom tag library, which made this analysis useless on all of them while
+    passing on a demo that has none.
+    """
+    from django.template import Engine
+    from django.template.backends.django import DjangoTemplates
+    from django.template.loader import engines
+
+    for backend in engines.all():
+        if isinstance(backend, DjangoTemplates):
+            return backend.engine
+    try:
+        return Engine.get_default()
+    except Exception:  # noqa: BLE001 - no DjangoTemplates backend configured
+        return Engine(debug=False)
+
+
 def analyse_template(template_path: str, root_models: dict[str, str]) -> dict[str, Any]:
     """Report relation crossings in one template.
 
@@ -163,7 +185,6 @@ def analyse_template(template_path: str, root_models: dict[str, str]) -> dict[st
     """
     ensure_django()
     from django.apps import apps
-    from django.template import Engine
 
     path = Path(template_path).expanduser()
     if not path.is_file():
@@ -176,8 +197,7 @@ def analyse_template(template_path: str, root_models: dict[str, str]) -> dict[st
         except (LookupError, ValueError) as exc:
             raise ValueError(f"Unknown model '{label}' for context variable '{name}'") from exc
 
-    engine = Engine(debug=False)
-    template = engine.from_string(path.read_text(encoding="utf-8"))
+    template = _project_engine().from_string(path.read_text(encoding="utf-8"))
 
     findings: list[dict[str, Any]] = []
     _walk(template.nodelist, scope, False, findings)

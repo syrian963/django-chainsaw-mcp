@@ -135,8 +135,8 @@ def contract(max_depth: int = 3) -> dict[str, Any]:
     # A serializer no view names is still in the contract, so removing it gets
     # reported as breaking when nobody was reading it. Labelling which views
     # serve what turns that from a wrong verdict into a qualified one.
-    served = serializers_used_by_views()
-    dynamic = dynamic_serializer_views()
+    served = serializers_used_by_views(config.project_path)
+    dynamic = dynamic_serializer_views(config.project_path)
 
     captured: dict[str, Any] = {}
     unreadable: list[str] = []
@@ -155,9 +155,16 @@ def contract(max_depth: int = 3) -> dict[str, Any]:
         # have had their say, so the captured shape is the shape before that
         # runs. It cannot be read, but its presence can, and a contract with an
         # unannounced rewrite sitting on top of it is a contract with a hole.
+        # DRF defines get_fields and to_representation on its own base classes,
+        # so walking the whole MRO flagged every serializer in existence. Only
+        # an override written in this project reshapes anything.
         reshapes = sorted(
             m for m in ("to_representation", "get_fields")
-            if any(m in klass.__dict__ for klass in cls.__mro__[:-2])
+            if any(
+                m in klass.__dict__
+                and not klass.__module__.startswith("rest_framework")
+                for klass in cls.__mro__
+            )
         )
 
         captured[name] = {
@@ -176,7 +183,11 @@ def contract(max_depth: int = 3) -> dict[str, Any]:
         "serializer_count": len(captured),
         "serializers": captured,
         "unreadable": unreadable,
-        "unserved": sorted(_unserved(captured, served)),
+        # If no view anywhere declares a serializer_class, every serializer is
+        # "unserved" and the field means nothing. Saying so is the difference
+        # between an empty answer and a wrong one.
+        "attribution_possible": bool(served),
+        "unserved": sorted(_unserved(captured, served)) if served else [],
         "reshaped": sorted(n for n in captured if captured[n]["reshapes_output"]),
         "views_choosing_at_runtime": dynamic,
         "discovery": discovered,
@@ -185,6 +196,11 @@ def contract(max_depth: int = 3) -> dict[str, Any]:
             "serializer in a module nothing imports at startup is not in here. "
             "A SerializerMethodField appears with its declared type and nothing "
             "about what it returns, because that is only knowable at runtime. "
+            "No view in this project declares a serializer_class, so which "
+            "serializer serves what could not be determined at all and "
+            "'unserved' is empty rather than listing everything - an empty "
+            "list here means the question could not be asked. "
+            if not served else
             "A serializer listed under 'unserved' is named by no view's "
             "serializer_class, so a change to it probably reaches nobody - but "
             "only probably, because a view in 'views_choosing_at_runtime' picks "

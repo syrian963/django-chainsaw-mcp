@@ -167,7 +167,8 @@ skipped chain writes or sends something. Also in the aggregate `check` as
 django-chainsaw races [--search-path DIR] [--no-parameters] [--fail-on-findings]
 ```
 
-Read-modify-save races and `select_for_update()` outside a transaction.
+Read-modify-save races, `select_for_update()` outside a transaction, and
+upserts with no unique constraint behind their lookup.
 `--fail-on-findings` exits `1` on any high-confidence race or any unprotected
 lock; `--no-parameters` drops the medium-confidence tier. Also in the aggregate
 `check` as `races`.

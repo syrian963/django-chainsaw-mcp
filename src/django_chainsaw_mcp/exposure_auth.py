@@ -30,71 +30,16 @@ looks completely innocent.
 from __future__ import annotations
 
 import ast
-import importlib
 from pathlib import Path
 from typing import Any
 
-from .discovery import load_serializer_modules
+from .discovery import load_serializer_modules, load_view_modules
 from .django_env import ensure_django
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
     ".pytest_cache", "site-packages", "dist", "build", "migrations",
 }
-_VIEW_HINTS = ("View", "ViewSet")
-
-_loaded_views: dict[str, dict[str, Any]] = {}
-
-
-def _module_name(path: Path, root: Path) -> str:
-    parts = list(path.relative_to(root).with_suffix("").parts)
-    if parts and parts[-1] == "__init__":
-        parts.pop()
-    return ".".join(parts)
-
-
-def load_view_modules(root: Path) -> dict[str, Any]:
-    """Import every module declaring a View subclass, for the same reason
-    `load_serializer_modules` exists: a view no URLconf reaches in this
-    environment is not in `__subclasses__()`, and an unreached view is still
-    a served view in production."""
-    key = str(root)
-    if key in _loaded_views:
-        return _loaded_views[key]
-
-    import sys
-
-    imported: list[str] = []
-    failed: list[dict[str, str]] = []
-    for path in sorted(root.rglob("*.py")):
-        if any(part in _SKIP_DIRS for part in path.parts):
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, SyntaxError):
-            continue
-        declares = any(
-            isinstance(node, ast.ClassDef)
-            and any(
-                (base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", ""))
-                .endswith(_VIEW_HINTS)
-                for base in node.bases
-            )
-            for node in ast.walk(tree)
-        )
-        if not declares:
-            continue
-        module = _module_name(path, root)
-        if not module or module in sys.modules:
-            continue
-        try:
-            importlib.import_module(module)
-            imported.append(module)
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
-            failed.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})
-
-    _loaded_views[key] = {"imported": imported, "failed": failed}
-    return _loaded_views[key]
 
 
 def _default_permissions() -> tuple[list[Any], str]:

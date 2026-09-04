@@ -137,6 +137,7 @@ def scan_templates(
     results: list[dict[str, Any]] = []
     analysed = 0
     skipped: list[str] = []
+    unreadable: list[dict[str, str]] = []
     total_high = 0
 
     for path in _iter_templates(templates_dir):
@@ -149,7 +150,14 @@ def scan_templates(
             skipped.append(str(path.relative_to(templates_dir)))
             continue
 
-        report = analyse_template(str(path), context)
+        try:
+            report = analyse_template(str(path), context)
+        except Exception as exc:  # noqa: BLE001 - one bad template is not a failed run
+            unreadable.append({
+                "template": str(path.relative_to(templates_dir)),
+                "error": f"{type(exc).__name__}: {exc}".split("\n")[0][:200],
+            })
+            continue
         analysed += 1
         total_high += report["high_severity_count"]
         if report["candidate_count"]:
@@ -169,6 +177,8 @@ def scan_templates(
         "templates_found": analysed + len(skipped),
         "templates_analysed": analysed,
         "templates_skipped_no_context": skipped,
+        "templates_unreadable": unreadable,
+        "templates_unreadable_count": len(unreadable),
         "templates_with_findings": len(results),
         "high_severity_total": total_high,
         "results": results,
@@ -176,6 +186,10 @@ def scan_templates(
             "Context is resolved from class-based views that declare both "
             "template_name and model or queryset. Function views and anything "
             "built at runtime cannot be resolved statically; pass root_models "
-            "for those, or they are skipped and listed."
+            "for those, or they are skipped and listed. A template that could "
+            "not be parsed at all is listed under templates_unreadable with the "
+            "reason rather than ending the run: a partial written to be included "
+            "may depend on tags its parent loads, and one of those must not cost "
+            "the other nine hundred."
         ),
     }

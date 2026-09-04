@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Two concurrency defects that read as perfectly ordinary code.
+"""Three concurrency defects that read as perfectly ordinary code.
 
 ## Read, modify, save
 
@@ -42,8 +42,22 @@ line. Whether a transaction is open is exactly what the call graph already
 knows, including one opened by a caller in another module and the implicit one
 `ATOMIC_REQUESTS` puts around every view.
 
-Nothing in the linter ecosystem looks at either of these. The Django docs
-describe both, in the reference for `F()` and for `select_for_update()`,
+## `get_or_create()` on fields nothing makes unique
+
+    Tag.objects.get_or_create(name=label)
+
+Two requests miss the `get` at the same moment, both `create`, and there are
+two tags called `label`. The next `get_or_create` raises
+`MultipleObjectsReturned`, which the method does not catch. Django's own
+documentation says this works only when the lookup fields carry a database
+uniqueness constraint; the tickets about it (#12579, #29499) are old and will
+stay open, because the database is the only thing that can enforce it. Whether
+the lookup is covered by a unique field, a `unique_together` or a
+`UniqueConstraint` is a fact about the model, and it is checked here.
+
+Nothing in the linter ecosystem looks at any of these three. The Django docs
+describe all three, in the reference for `F()`, `select_for_update()` and
+`get_or_create()`,
 which is where nobody is looking when they write the three lines above.
 """
 
@@ -177,6 +191,89 @@ class _FunctionScan(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+_UPSERTS = {"get_or_create", "update_or_create"}
+
+
+def _unique_sets(model: Any) -> list[frozenset[str]]:
+    """Every set of field names the database guarantees unique, as names.
+
+    A lookup is covered when it contains one of these sets in full. A lookup on
+    a *superset* is also covered: if `sku` is unique then `sku, name` can
+    match at most one row.
+    """
+    out: list[frozenset[str]] = [frozenset({"pk"}), frozenset({model._meta.pk.name})]
+    for field in model._meta.concrete_fields:
+        if getattr(field, "unique", False):
+            out.append(frozenset({field.name}))
+            if field.attname != field.name:
+                out.append(frozenset({field.attname}))
+    for group in getattr(model._meta, "unique_together", ()) or ():
+        out.append(frozenset(group))
+    for constraint in getattr(model._meta, "constraints", ()) or ():
+        fields = getattr(constraint, "fields", None)
+        # A conditional UniqueConstraint only holds where its condition is
+        # true, and whether the lookup satisfies the condition is not
+        # decidable here, so it is not counted as cover.
+        if fields and getattr(constraint, "condition", None) is None:
+            out.append(frozenset(fields))
+    return out
+
+
+def _upsert_findings(tree: ast.AST, relative: str, lines: list[str], by_class: dict[str, Any]) -> list[dict[str, Any]]:
+    from .tenancy import _unwind  # noqa: PLC2701 - the queryset-chain reader
+
+    out: list[dict[str, Any]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in _UPSERTS:
+            continue
+        result = _unwind(node)
+        if result is None or not result[0]:
+            continue
+        class_name, _methods, raw_keys = result
+        model = by_class.get(class_name)
+        if model is None:
+            continue
+
+        # `defaults=` is not a lookup, and a positional Q() cannot be read.
+        keys = [k for k in raw_keys if k not in {"defaults", "<positional>"}]
+        if "<positional>" in raw_keys or not keys:
+            continue
+        # `customer__email=...` reaches through a relation; whether the far
+        # side is unique is a different model's business and is not judged.
+        if any("__" in k and not k.endswith(("__exact",)) for k in keys):
+            continue
+        lookup = frozenset(k.removesuffix("__exact") for k in keys)
+
+        unique_sets = _unique_sets(model)
+        if any(group <= lookup for group in unique_sets):
+            continue
+
+        line = node.lineno
+        out.append({
+            "file": relative,
+            "line": line,
+            "code": lines[line - 1].strip()[:160] if line <= len(lines) else "",
+            "model": model._meta.label,
+            "method": node.func.attr,
+            "lookup": sorted(lookup),
+            "unique_on_model": sorted(sorted(g) for g in unique_sets if "pk" not in g and g != {model._meta.pk.name}),
+            "severity": "high",
+            "why": (
+                "two requests miss the get at the same moment, both create, and "
+                "there are two rows. The next call raises MultipleObjectsReturned, "
+                "which get_or_create does not catch. Only a database constraint "
+                "on the lookup fields prevents this"
+            ),
+            "fix": (
+                f"add a UniqueConstraint(fields={sorted(lookup)}) to {model.__name__}.Meta "
+                "and a migration; or look up by a field that is already unique"
+            ),
+        })
+    return out
+
+
 def _function_nodes(tree: ast.AST):
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -208,8 +305,13 @@ def race_conditions(
     graph = callgraph.build(root)
     in_caller_transaction = callgraph.inside_transaction(graph)
 
+    from django.apps import apps
+
+    by_class = {m.__name__: m for m in apps.get_models()}
+
     races: list[dict[str, Any]] = []
     unlocked: list[dict[str, Any]] = []
+    upserts: list[dict[str, Any]] = []
     files_scanned = 0
 
     for path in root.rglob("*.py"):
@@ -226,6 +328,8 @@ def race_conditions(
 
         def code(line: int) -> str:
             return lines[line - 1].strip()[:160] if line <= len(lines) else ""
+
+        upserts.extend(_upsert_findings(tree, relative, lines, by_class))
 
         for fn in _function_nodes(tree):
             qualname = _qualname_of(graph, relative, fn)
@@ -307,6 +411,7 @@ def race_conditions(
 
     races.sort(key=lambda f: (f["confidence"] != "high", f["file"], f["line"]))
     unlocked.sort(key=lambda f: (f["file"], f["line"]))
+    upserts.sort(key=lambda f: (f["file"], f["line"]))
 
     return {
         "search_path": str(root),
@@ -314,10 +419,14 @@ def race_conditions(
         "atomic_requests": atomic_requests,
         "race_count": len(races),
         "unlocked_lock_count": len(unlocked),
-        "finding_count": len(races) + len(unlocked),
-        "high_confidence_count": sum(1 for f in races if f["confidence"] == "high") + len(unlocked),
+        "unsafe_upsert_count": len(upserts),
+        "finding_count": len(races) + len(unlocked) + len(upserts),
+        "high_confidence_count": (
+            sum(1 for f in races if f["confidence"] == "high") + len(unlocked) + len(upserts)
+        ),
         "races": races,
         "locks_outside_transaction": unlocked,
+        "unsafe_upserts": upserts,
         "note": (
             "A race is reported only when all three parts are on the same object "
             "in the same function: a fetch (or a parameter), an in-Python change "
@@ -326,7 +435,11 @@ def race_conditions(
             "silent. An instance passed in as a parameter is medium confidence, "
             "because the caller may hold the lock. A lock outside a transaction is "
             "judged with the call graph: a caller's atomic(), a decorator, or "
-            "ATOMIC_REQUESTS on a view all count as a transaction. What this cannot "
+            "ATOMIC_REQUESTS on a view all count as a transaction. A get_or_create or "
+            "update_or_create is unsafe when no unique field, unique_together or "
+            "unconditional UniqueConstraint on the model covers its lookup; a lookup "
+            "through a relation (customer__email) is another model's business and is "
+            "not judged, and a positional Q() cannot be read. What this cannot "
             "see is a lock held by some other mechanism, such as an advisory lock "
             "or a distributed one, around the read-modify-save."
         ),

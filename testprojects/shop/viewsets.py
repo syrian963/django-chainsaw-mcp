@@ -5,6 +5,7 @@ what it needs. The estimator should put several hundred queries between them.
 """
 
 from rest_framework import serializers, viewsets
+from rest_framework.pagination import PageNumberPagination
 
 from .models import Order, Product
 from .api_serializers import ProductSerializer
@@ -81,3 +82,21 @@ class DeferredOrderViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = OrderSummarySerializer
     queryset = Order.objects.only("id")
+
+
+class _TwentyPerPage(PageNumberPagination):
+    page_size = 20
+
+
+class PaginatedOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """The only list endpoint here that says how many rows a page holds.
+
+    Every other list view in this project has no pagination_class and the
+    project sets no DEFAULT_PAGINATION_CLASS, so they return the whole table.
+    """
+
+    serializer_class = OrderDetailSerializer
+    pagination_class = _TwentyPerPage
+    queryset = Order.objects.select_related("customer").prefetch_related(
+        "lines", "lines__product", "lines__product__category"
+    )

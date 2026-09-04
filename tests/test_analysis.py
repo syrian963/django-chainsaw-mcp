@@ -494,7 +494,11 @@ def test_a_querying_method_field_is_counted_not_shrugged_at():
     assert fields["line_count"] == 1
     assert fields["latest_line"] == 2
     assert endpoint["estimated_queries"] > 100, endpoint["breakdown"]
-    assert not endpoint["at_least"], "the method was readable, so nothing is unbounded"
+    # The endpoint is unpaginated, which is its own unbounded term. The claim
+    # under test is narrower: the method fields themselves were readable, so
+    # none of THEIR breakdown lines is an unknown.
+    method_lines = [b for b in endpoint["breakdown"] if b["reason"].startswith("get_")]
+    assert method_lines and all(b["queries"] is not None for b in method_lines)
 
 
 def test_only_that_omits_a_rendered_column_costs_queries():
@@ -578,12 +582,34 @@ def test_a_serializer_that_rewrites_its_own_output_is_named():
     # to_representation runs after the fields have had their say, so the
     # captured contract is the shape going in. That is a real hole and it is
     # named rather than papered over.
+    #
+    # The first version of this test only asserted the key existed, which let
+    # a useless signal through: DRF defines get_fields and to_representation
+    # on its own base classes, so walking the whole MRO flagged every
+    # serializer that has ever been written. A flag that is always on carries
+    # no information, so the test now pins both directions.
     from django_chainsaw_mcp.api_contract import contract
 
     captured = contract()
     for name, entry in captured["serializers"].items():
         assert "reshapes_output" in entry, name
-    assert isinstance(captured["reshaped"], list)
+
+    # A serializer that overrides nothing must not be flagged. Every
+    # serializer in existence inherits DRF's own get_fields, so a flag that
+    # catches that is always on and carries no information.
+    plain = captured["serializers"]["shop.api_serializers.CustomerSerializer"]
+    assert plain["reshapes_output"] == [], plain["reshapes_output"]
+    assert len(captured["reshaped"]) < captured["serializer_count"], (
+        "flagging every serializer means the check is matching DRF's base "
+        f"classes: {captured['reshaped']}"
+    )
+
+
+def test_a_project_override_of_to_representation_is_named():
+    from django_chainsaw_mcp.api_contract import contract
+
+    reshaped = contract()["reshaped"]
+    assert any("ReshapedInvoiceSerializer" in name for name in reshaped), reshaped
 
 
 def _bypass():
@@ -736,3 +762,83 @@ def test_every_view_module_imports():
     # A module that fails to import is a module whose views are invisible,
     # and this project's own fixtures must not be in that state.
     assert _open()["view_discovery"]["failed"] == []
+
+
+def _upserts():
+    return {
+        (f["model"].rsplit(".", 1)[-1], f["method"], tuple(f["lookup"])): f
+        for f in _races()["unsafe_upserts"]
+    }
+
+
+def test_get_or_create_on_a_non_unique_field_is_reported_with_the_real_unique_fields():
+    found = _upserts()
+    tag = found[("Tag", "get_or_create", ("name",))]
+    # The fix is only useful if it says what IS unique, so the reader can
+    # judge whether to look up by that instead.
+    assert ["slug"] in tag["unique_on_model"]
+
+
+def test_update_or_create_is_the_same_race_and_defaults_is_not_a_lookup():
+    found = _upserts()
+    assert ("Product", "update_or_create", ("name",)) in found
+    assert all("defaults" not in key[2] for key in found)
+
+
+def test_a_lookup_covered_by_a_unique_field_is_silent_including_supersets_and_pk():
+    lookups = {key[2] for key in _upserts()}
+    assert ("sku",) not in lookups
+    assert ("name", "sku") not in lookups, "a superset of a unique field matches at most one row"
+    assert ("pk",) not in lookups
+
+
+def test_a_lookup_through_a_relation_is_not_judged():
+    assert not any("user__email" in key[2] for key in _upserts())
+
+
+def test_an_unpaginated_list_endpoint_is_not_pretended_to_return_fifty_rows():
+    # No pagination_class and no DEFAULT_PAGINATION_CLASS means the whole
+    # table. The estimate can still assume a number, but it must say it is a
+    # floor and name the endpoint as unbounded.
+    slow = _endpoints()["SlowOrderViewSet"]
+    assert slow["pagination"]["paginated"] is False
+    assert slow["at_least"] is True
+    reasons = " ".join(b["reason"] for b in slow["breakdown"])
+    assert "no pagination" in reasons
+
+
+def test_a_paginated_endpoint_uses_its_own_page_size():
+    paginated = _endpoints()["PaginatedOrderViewSet"]
+    assert paginated["pagination"]["paginated"] is True
+    assert paginated["pagination"]["page_size"] == 20
+    assert paginated["objects_assumed"] == 20
+
+
+def test_unpaginated_endpoints_are_listed_at_the_top_level():
+    from django_chainsaw_mcp.endpoint_cost import endpoint_cost
+
+    report = endpoint_cost()
+    names = {v.rsplit(".", 1)[-1] for v in report["unpaginated_list_endpoints"]}
+    assert "SlowOrderViewSet" in names
+    assert "PaginatedOrderViewSet" not in names
+
+
+def test_endpoint_cost_counts_the_views_it_could_not_use():
+    # A project whose views build responses by hand yields zero endpoints, and
+    # "0" reads as a clean result rather than an empty one. The counts are what
+    # tell those apart.
+    from django_chainsaw_mcp.endpoint_cost import endpoint_cost
+
+    report = endpoint_cost()
+    assert report["views_seen"] >= report["endpoint_count"]
+    assert report["views_seen"] == report["endpoint_count"] + report["views_without_serializer_class"]
+
+
+def test_attribution_is_reported_as_possible_when_a_view_names_a_serializer():
+    from django_chainsaw_mcp.api_contract import contract
+
+    captured = contract()
+    assert captured["attribution_possible"] is True
+    # and with attribution working, unserved is a real answer rather than
+    # every serializer in the project
+    assert len(captured["unserved"]) < captured["serializer_count"]

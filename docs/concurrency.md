@@ -77,13 +77,45 @@ Whether a transaction is open is exactly what the call graph already knows. A
 module that opened one, and the implicit transaction `ATOMIC_REQUESTS` puts
 around every view **all count**, so none of those produce a finding.
 
+## `get_or_create()` on fields nothing makes unique
+
+```python
+Tag.objects.get_or_create(name=label)
+```
+
+Two requests miss the `get` at the same moment. Both `create`. There are now
+two tags called `label`, and the next `get_or_create` raises
+`MultipleObjectsReturned` — which the method does not catch, because it only
+catches `DoesNotExist`.
+
+Django's documentation says this in so many words: the method is safe only when
+the lookup fields carry a database uniqueness constraint. The tickets about it
+(#12579, #29499) are years old and will stay open, because the database is the
+only thing that can enforce it. So the check reads the model:
+
+```
+2 get_or_create/update_or_create on a lookup nothing makes unique
+
+  shop/upserts.py:12  shop.Tag.get_or_create(name=...)
+         unique on Tag: slug
+         fix: add a UniqueConstraint(fields=['name']) to Tag.Meta and a migration;
+              or look up by a field that is already unique
+```
+
+A lookup is covered by a unique field, a `unique_together`, or an
+**unconditional** `UniqueConstraint` — a conditional one only holds where its
+condition is true, and whether the lookup satisfies it is not decidable here.
+A superset of a unique set is covered too: if `sku` is unique, `sku, name`
+matches at most one row. `defaults=` is not a lookup. A lookup through a
+relation (`customer__email`) is another model's business and is not judged.
+
 ## In CI
 
 ```bash
 django-chainsaw races --fail-on-findings
 ```
 
-Exit 1 on any high-confidence race or any unprotected lock. Also in the
+Exit 1 on any high-confidence race, any unprotected lock, or any unsafe upsert. Also in the
 aggregate `check` as `races`.
 
 ## What it cannot see

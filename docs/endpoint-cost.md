@@ -65,6 +65,34 @@ django-chainsaw cost --page-size 50 --fan-out 5
 assumption**, and the output says so. What survives every choice of fan-out is
 that one of these endpoints is a different kind of thing from the other.
 
+## No pagination is not fifty rows
+
+The first version assumed every list endpoint returned `page_size` rows. A view
+with no `pagination_class`, in a project that never set
+`DEFAULT_PAGINATION_CLASS`, returns **the whole table** — and that describes
+every list view in this demo project, so the number 50 was a fiction dressed up
+as an input.
+
+The real page size is read from the view's paginator, or from
+`REST_FRAMEWORK["PAGE_SIZE"]`, and used. When there is none:
+
+```
+     ?  no pagination: every row, not 50
+        no pagination_class on the view and no DEFAULT_PAGINATION_CLASS. The
+        per-object terms below assume 50 rows; the response actually carries
+        the whole table, so this estimate is a floor that grows with the data
+
+3 list endpoint(s) with no pagination return the whole table; their estimates
+above are floors:
+    shop.viewsets.SlowOrderViewSet
+```
+
+The endpoint is marked `at least`, the unpaginated ones are listed at the top
+level, and the estimate still multiplies by `page_size` so the **ratio**
+between endpoints stays comparable. An unbounded list endpoint is a finding on
+its own: it is one `?page_size=` away from nothing and one large customer away
+from a timeout.
+
 ## Arguments
 
 | Argument | Default | |

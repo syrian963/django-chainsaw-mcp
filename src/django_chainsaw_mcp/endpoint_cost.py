@@ -34,7 +34,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from .discovery import load_serializer_modules
+from .discovery import load_serializer_modules, load_view_modules
 from .django_env import ensure_django
 from .serializer_nplusone import serializer_nplusone
 
@@ -147,6 +147,49 @@ def _method_field_queries(serializer_cls: Any, field_name: str) -> dict[str, Any
     }
 
 
+def _pagination_for(cls: Any, assumed: int) -> dict[str, Any]:
+    """How many rows one list response actually returns, and why.
+
+    The first version assumed `page_size` rows for every list endpoint. A view
+    with no pagination_class in a project with no DEFAULT_PAGINATION_CLASS
+    returns the whole table, and the number 50 was a fiction dressed up as an
+    input. The real page size is on the view or in the settings, and "none"
+    is an answer that has to be reported as such.
+    """
+    paginator = getattr(cls, "pagination_class", None)
+    if paginator is None:
+        return {
+            "paginated": False,
+            "page_size": None,
+            "source": "no pagination_class on the view and no DEFAULT_PAGINATION_CLASS",
+            "rows": "every row in the table",
+            "assumed_for_estimate": assumed,
+        }
+    size = getattr(paginator, "page_size", None)
+    source = f"{paginator.__name__}.page_size"
+    if size is None:
+        from rest_framework.settings import api_settings
+
+        size = api_settings.PAGE_SIZE
+        source = f"{paginator.__name__} via REST_FRAMEWORK['PAGE_SIZE']"
+    if size is None:
+        # A paginator with no page size paginates nothing.
+        return {
+            "paginated": False,
+            "page_size": None,
+            "source": f"{paginator.__name__} with no page_size anywhere",
+            "rows": "every row in the table",
+            "assumed_for_estimate": assumed,
+        }
+    return {
+        "paginated": True,
+        "page_size": int(size),
+        "source": source,
+        "rows": f"{size} per page",
+        "assumed_for_estimate": int(size),
+    }
+
+
 def _view_classes() -> list[Any]:
     """Every DRF view class Python has imported."""
     try:
@@ -224,6 +267,9 @@ def endpoint_cost(
     # reaches. A serializer outside that is real, served, and was
     # previously invisible to a __subclasses__() walk.
     discovered = load_serializer_modules(config.project_path)
+    # And the views, or a project whose URLconf does not reach them at
+    # analysis time reports zero endpoints, which reads as a clean result.
+    load_view_modules(config.project_path)
 
     views = _view_classes()
     if not views:
@@ -231,6 +277,15 @@ def endpoint_cost(
             "rest_framework_installed": False,
             "endpoints": [],
             "note": (
+            (
+                f"{views_seen} view(s) were found and none of them declares a "
+                "serializer_class, so there was nothing to estimate. This "
+                "estimate works from a view's serializer and its queryset; a "
+                "view that builds its response by hand is invisible to it. An "
+                "empty result here means 'could not look', not 'nothing to "
+                "find'.\n\n"
+                if views_seen and not endpoints else ""
+            ) +
                 "No DRF view classes are importable. If the project uses DRF, "
                 "the server is running in the wrong environment; see "
                 "docs/usage.md."
@@ -247,10 +302,18 @@ def endpoint_cost(
             crossings.setdefault(root, []).append(finding)
 
     endpoints: list[dict[str, Any]] = []
+    unpaginated: list[str] = []
+    # A project whose views build their responses by hand has nothing here to
+    # estimate, and "0 endpoints" reads as a clean result rather than as an
+    # empty one. Counting what was looked at is the difference.
+    views_seen = 0
+    views_without_serializer = 0
 
     for cls in views:
+        views_seen += 1
         serializer_cls = getattr(cls, "serializer_class", None)
         if serializer_cls is None:
+            views_without_serializer += 1
             continue
 
         serializer_name = f"{serializer_cls.__module__}.{serializer_cls.__qualname__}"
@@ -260,21 +323,40 @@ def endpoint_cost(
         if list_only and not is_list:
             continue
 
-        objects = page_size if is_list else 1
+        pagination = _pagination_for(cls, page_size) if is_list else None
+        objects = pagination["assumed_for_estimate"] if is_list else 1
         opt = _optimisations(cls)
 
         base = 1
         breakdown: list[dict[str, Any]] = [
             {"reason": "the page itself", "queries": base, "detail": "one query for the queryset"}
         ]
-        if is_list:
+        total = base
+        unbounded = False
+
+        if is_list and pagination["paginated"]:
             base += 1
+            total += 1
             breakdown.append(
                 {"reason": "pagination count", "queries": 1, "detail": "COUNT(*) for the page count"}
             )
-
-        total = base
-        unbounded = False
+        elif is_list:
+            # Every per-object term below is multiplied by page_size as a
+            # stated assumption, but the real multiplier is the row count of
+            # the table, which nothing here can know. So the total is a floor.
+            unbounded = True
+            unpaginated.append(f"{cls.__module__}.{cls.__qualname__}")
+            breakdown.append(
+                {
+                    "reason": f"no pagination: every row, not {page_size}",
+                    "queries": None,
+                    "detail": (
+                        f"{pagination['source']}. The per-object terms below assume "
+                        f"{page_size} rows; the response actually carries the whole "
+                        "table, so this estimate is a floor that grows with the data"
+                    ),
+                }
+            )
 
         for finding in crossings.get(serializer_name, []):
             lookup = finding["lookup"]
@@ -408,6 +490,7 @@ def endpoint_cost(
                 "serializer": serializer_name,
                 "kind": "list" if is_list else "detail",
                 "objects_assumed": objects,
+                "pagination": pagination,
                 "estimated_queries": total,
                 "at_least": unbounded,
                 "method_fields": method_field_detail,
@@ -436,12 +519,18 @@ def endpoint_cost(
         "page_size": page_size,
         "nested_fan_out": nested_fan_out,
         "endpoint_count": len(endpoints),
+        "views_seen": views_seen,
+        "views_without_serializer_class": views_without_serializer,
+        "unpaginated_list_endpoints": sorted(unpaginated),
         "worst": worst["view"] if worst else None,
         "worst_estimate": worst["estimated_queries"] if worst else 0,
         "endpoints": endpoints,
         "note": (
             "An estimate, and deliberately a rough one. It assumes every "
-            "serializer field is rendered, that a list returns page_size "
+            "serializer field is rendered, that a paginated list returns its "
+            "real page size and an unpaginated one returns page_size as a stated "
+            "floor - it actually returns every row in the table, which is a "
+            "finding in itself. An unpaginated list endpoint returns "
             "objects, and that a relation not named in select_related or "
             "prefetch_related costs one query per object. It cannot see inside "
             "a SerializerMethodField, cannot follow a queryset built at "

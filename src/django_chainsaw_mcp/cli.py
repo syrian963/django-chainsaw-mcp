@@ -198,6 +198,12 @@ def _cmd_cost(args: argparse.Namespace) -> int:
                 count = "?" if item["queries"] is None else item["queries"]
                 print(f"            {count:>8}  {item['reason']}")
             print()
+        if report["unpaginated_list_endpoints"]:
+            print(f"{len(report['unpaginated_list_endpoints'])} list endpoint(s) with no pagination "
+                  "return the whole table; their estimates above are floors:")
+            for view in report["unpaginated_list_endpoints"]:
+                print(f"    {view}")
+            print()
         print(report["note"])
 
     if args.max_queries is not None and report["worst_estimate"] > args.max_queries:
@@ -371,7 +377,7 @@ def _cmd_races(args: argparse.Namespace) -> int:
 
     if not args.json:
         if not report["finding_count"]:
-            print(f"No read-modify-save races and no unprotected row locks in "
+            print(f"No read-modify-save races, no unprotected row locks and no unsafe upserts in "
                   f"{report['files_scanned']} file(s).")
         if report["races"]:
             print(f"{report['race_count']} read-modify-save race(s)")
@@ -381,6 +387,17 @@ def _cmd_races(args: argparse.Namespace) -> int:
                 print(f"  {f['file']}:{f['line']}  {f['instance']}.{f['field']} in {f['function']}{flag}")
                 print(f"         {f['code']}")
                 print(f"         saved at line {f['saved_at_line']}; {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        if report["unsafe_upserts"]:
+            print(f"{report['unsafe_upsert_count']} get_or_create/update_or_create on a lookup nothing makes unique")
+            print()
+            for f in report["unsafe_upserts"]:
+                print(f"  {f['file']}:{f['line']}  {f['model']}.{f['method']}({', '.join(f['lookup'])}=...)")
+                print(f"         {f['code']}")
+                unique = ", ".join("+".join(g) for g in f["unique_on_model"]) or "nothing"
+                print(f"         unique on {f['model'].split('.')[-1]}: {unique}")
+                print(f"         {f['why']}")
                 print(f"         fix: {f['fix']}")
                 print()
         if report["locks_outside_transaction"]:
@@ -1194,7 +1211,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if any bulk write skips effects that write or send")
     p.set_defaults(func=_cmd_bypass)
 
-    p = sub.add_parser("races", help="read-modify-save races and locks outside a transaction")
+    p = sub.add_parser("races", help="read-modify-save races, locks outside a transaction, upserts with no unique constraint")
     p.add_argument("--search-path", metavar="DIR")
     p.add_argument("--no-parameters", action="store_true",
                    help="only report instances fetched in the same function")

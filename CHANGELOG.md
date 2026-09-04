@@ -7,6 +7,24 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`endpoint_cost` reads the real page size and names unpaginated list
+  endpoints.** The first version assumed `page_size` rows for every list view.
+  A view with no `pagination_class` in a project with no
+  `DEFAULT_PAGINATION_CLASS` returns the whole table, and the number 50 was a
+  fiction dressed up as an input - it described every list view in the demo
+  project. Paginated views now use their own page size; unpaginated ones are
+  marked as floors and listed at the top level, because a list endpoint with
+  no upper bound is a finding on its own.
+
+- **`race_conditions` also reports `get_or_create`/`update_or_create` with no
+  unique constraint behind the lookup.** Two requests miss the get together,
+  both create, and the next call raises `MultipleObjectsReturned`, which the
+  method does not catch. Django's docs say a database constraint is the only
+  protection; the check reads the model for a unique field, `unique_together`
+  or an unconditional `UniqueConstraint` covering the lookup, treats a superset
+  of one as covered, ignores `defaults=`, and does not judge a lookup through a
+  relation. Prior art: two open Django tickets and blog posts, no tool.
+
 - **`open_endpoints`**: endpoints anyone can call, crossed with what their
   serializer exposes. `serializer_exposure` knows a serializer leaks a password
   reset token and a Semgrep rule knows a view has `AllowAny`; each is a
@@ -248,6 +266,33 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   interpreter. The documented install path is verified, not assumed.
 
 ### Fixed
+
+- **Template analysis crashed on the first custom tag library.** It parsed with
+  a bare `Engine()`, which has no `libraries` and no `DIRS`, so `{% load %}`
+  raised `TemplateSyntaxError` and `{% extends %}` could not find its parent.
+  Every project of any size has a custom tag library, so this made the check
+  useless on all of them while passing on a demo that has none. It now parses
+  with the engine the project actually renders with, and a template that still
+  cannot be read is listed under `templates_unreadable` with the reason instead
+  of ending the run.
+- **Three checks walked View subclasses without importing the view modules
+  first**, the same defect `discovery` was written to fix for serializers. On a
+  project whose URLconf does not reach every view at analysis time this made
+  `endpoint_cost` report zero endpoints and `api_contract` call every
+  serializer unserved - both silently, both looking like clean results.
+  `load_view_modules` moved into `discovery` and is now used by all of them.
+- **`reshapes_output` flagged every serializer in existence.** It walked the
+  whole MRO for `get_fields`/`to_representation`, and DRF defines both on its
+  own base classes, so the flag was always on and carried no information. It
+  now counts only overrides written outside `rest_framework`. The test that
+  should have caught this only asserted the key existed; it now pins both
+  directions.
+- **An empty result no longer reads as a clean one.** `endpoint_cost` reports
+  how many views it looked at and how many declared no `serializer_class`, and
+  `api_contract` reports `attribution_possible` and leaves `unserved` empty
+  rather than listing every serializer, when no view in the project names one.
+  A project whose views build their responses by hand gets "could not look",
+  not "nothing to find".
 
 - **The API contract needed a database, which defeated the point of it.**
   Reading `.choices` off a `PrimaryKeyRelatedField` iterates its queryset,

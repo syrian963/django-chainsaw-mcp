@@ -113,6 +113,19 @@ a URLconf is not knowable from the class. An abstract base view with no URL
 therefore appears among the open views. It also has no `permission_classes`,
 and every subclass inherits that, so it is not wasted information.
 
+### Views that build their response by hand
+
+`endpoint_cost` works from a view's serializer and its queryset. A plain
+`APIView` that assembles its response in code declares neither, so there is
+nothing to estimate. The report says how many views it looked at and how many
+had no `serializer_class`, because "0 endpoints" and "0 endpoints found among
+152 views" are different answers.
+
+The same applies to `api_contract`'s `unserved`: if no view anywhere declares a
+`serializer_class`, attribution is impossible and the field is empty with
+`attribution_possible: false`, rather than listing every serializer as
+unserved.
+
 ## Two things that are not limitations
 
 **Unresolved calls in the call graph.** Most of them are the standard library,
