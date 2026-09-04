@@ -1,0 +1,42 @@
+django-chainsaw-mcp
+Copyright (C) 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
+WHAT THE AGPL MEANS HERE
+
+The ordinary GPL is triggered by distributing software. A great deal of software
+is never distributed: it runs on a server and users only ever see its output.
+The AGPL closes that gap. Section 13 requires that anyone who lets users
+interact with a modified version over a network must offer those users the
+corresponding source.
+
+In practice:
+
+  - Reading, using and modifying this for yourself: no obligation.
+  - Running it inside your company on your own code: no obligation.
+  - Distributing it, or offering a modified version as a service: the source of
+    your modifications must be available under the same licence.
+  - Removing the copyright notices: not permitted under any circumstances.
+
+If those terms do not suit a commercial use, a separate licence can be
+negotiated with the copyright holder. Dual licensing is compatible with the
+AGPL precisely because the copyright holder is not bound by their own licence.
+
+
+ATTRIBUTION
+
+Keep this file, the LICENSE file and the copyright headers in the source files
+intact in any redistribution. That is the attribution requirement, and it is the
+part that survives forks.

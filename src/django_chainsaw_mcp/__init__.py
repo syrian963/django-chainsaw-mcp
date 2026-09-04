@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """django-chainsaw-mcp: read-only introspection of Django projects over MCP.
 
 Nothing is imported eagerly here. Importing .server at package level makes

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What happens if you delete one row of this model.
 
 Answers the question statically, from the model graph, without touching the

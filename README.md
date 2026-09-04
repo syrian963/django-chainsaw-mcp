@@ -17,6 +17,31 @@ looked at answer *what will hurt*:
 
 Everything is read-only, and most of it never touches the database.
 
+## One command to try it
+
+```bash
+django-chainsaw check --tenant-root myapp.Organisation
+```
+
+```
+44 finding(s): 1 critical, 14 high, 29 medium
+
+CRITICAL
+--------
+  [deploy-safety] RemoveField drops 'legacy_code' while code still uses it
+      shop/0002_remove_product_legacy_code
+      During a rolling deploy the old pods keep running against the new
+      schema and will fail.
+      fix: Ship a release that stops using it, deploy that everywhere,
+           then ship this migration.
+```
+
+Every analysis, merged, worst first, one exit code. `--sarif out.json` writes
+the same findings in the format GitHub and GitLab annotate a pull request with,
+so they land **on the line** instead of in a log nobody opens.
+
+Five minutes end to end: **[docs/quickstart.md](docs/quickstart.md)**.
+
 ## Two front ends, one analysis layer
 
 | | For |
@@ -37,6 +62,13 @@ Everything is read-only, and most of it never touches the database.
 | `deploy_safety` | **Is this destructive migration safe to ship yet?** |
 | `find_unscoped_queries` | **Which queries read data the caller may not own?** The IDOR shape. |
 | `what_happens_on` | **What does this save actually trigger?** Follows the signal chain. |
+| `missing_indexes` | Fields the code filters or sorts on that carry no index. |
+| `datetime_audit` | Naive datetimes and field defaults that break when the clock moves. |
+| `serializer_exposure` | What DRF serializers expose, including what the next migration will add. |
+| `serializer_nplusone` | N+1 in DRF serializers, which is where it lives in an API project. |
+| `explain_model` | **Everything about one model, plus the risks only visible combined.** |
+| `check` | Run them all, one severity-sorted list, one exit code. |
+| `suggest_fixes` | **Findings turned into code, grouped by how safe each one is to apply.** |
 
 Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
@@ -142,6 +174,15 @@ Findings are fingerprinted on file plus identity, never the line, so adding an
 import does not resurrect twenty findings nobody touched.
 [`docs/baseline.md`](docs/baseline.md).
 
+For a pull request there is a lighter ratchet that needs no committed file:
+
+```bash
+django-chainsaw tenancy --since main
+```
+
+Only findings in files the branch changed, compared at the **merge base** so a
+branch that is behind main is not blamed for other people's work.
+
 ## Quick start
 
 Install it **into your project's virtualenv**. The server calls
@@ -165,6 +206,7 @@ Point it at the project with two environment variables:
 
 ```bash
 django-chainsaw deploy-safety          # exit 1 if a migration is unsafe
+django-chainsaw tenancy --since main   # only what this branch introduced
 django-chainsaw n+1 --max-high 12      # exit 1 above the budget
 django-chainsaw delete-impact shop.Customer
 django-chainsaw --json models | jq .
@@ -205,17 +247,74 @@ output rather than hiding them:
 tooling the failure mode is not a crash, it is a plausible sentence that sends
 someone in the wrong direction.
 
+## Suggestions that are actual code
+
+A report ending in *add an ownership filter* has done the easy half. The
+interesting question is which fixes a machine can write correctly, and the
+answer is not the same for every check:
+
+| Class | Meaning | Applied automatically? |
+| --- | --- | --- |
+| **mechanical** | one correct answer from the code alone | **yes**, with `--write` |
+| **generated** | a machine writes it, a human decides if it should exist | no, written to a file to review |
+| **advisory** | real code, but the decision is about your domain | **never** |
+
+```diff
+  MECHANICAL
+- return Order.objects.filter(placed_at__gte=datetime.datetime.now())
++ return Order.objects.filter(placed_at__gte=timezone.now())
+
+  ADVISORY
+- return Order.objects.get(pk=pk)
++ return Order.objects.filter(customer=request.user).get(pk=pk)
+```
+
+**`request` is read from the enclosing function's signature, not assumed**, and
+when there is no request argument the tool says so rather than inventing one. It
+also names its own limit: whether `customer` points at a user, a profile or an
+organisation is a question about the domain, not the syntax.
+
+`--write` applies the mechanical class only, refuses any fix whose line changed
+since the analysis, and is idempotent. All four properties are covered by
+`fix_check.sh`. Details: [`docs/fixes.md`](docs/fixes.md).
+
+## Correlated risks
+
+The part no single check can produce. Three separate warnings, each ordinary on
+its own:
+
+```
+[CRITICAL] A full path from a URL to another owner's row
+    shop.Invoice belongs to an owner through 'order__customer'.
+    2 queryset(s) read it without scoping, and 1 serializer(s) return it
+    over the API.
+    seen by: find_unscoped_queries, serializer_exposure
+```
+
+`explain_model` runs every analysis for one model and looks for the overlaps:
+a cascade that crosses into a different owner's subtree, a save that reaches
+external systems several hops away, a sensitive field on owned data exposed by
+a wildcard serializer. Correlation is hard to get anywhere else because it needs
+all the analyses in one process over one model graph.
+
 ## Documentation
+
+**[docs/](docs/README.md) is the index.** The pages worth knowing about:
 
 | | |
 | --- | --- |
-| [`docs/usage.md`](docs/usage.md) | **start here**: installing against a real project, clients, Docker, troubleshooting |
+| [`docs/quickstart.md`](docs/quickstart.md) | **five minutes from clone to first finding** |
+| [`docs/usage.md`](docs/usage.md) | : installing against a real project, clients, Docker, troubleshooting |
 | [`docs/architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
 | [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
 | [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |
 | [`docs/tenancy.md`](docs/tenancy.md) | the IDOR shape, and why the model graph makes it checkable |
 | [`docs/signals.md`](docs/signals.md) | tracing the signal chain, and the other half of `delete_impact` |
+| [`docs/indexes.md`](docs/indexes.md) | static index gaps, and why an index is not free |
+| [`docs/datetimes-and-serializers.md`](docs/datetimes-and-serializers.md) | two defects that are correct today and wrong later |
+| [`docs/clients.md`](docs/clients.md) | Claude Code, Cursor, VS Code, Windsurf, Zed, Docker |
 | [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
+| [`docs/fixes.md`](docs/fixes.md) | suggestions as real code, and which ones can be applied |
 | [`docs/baseline.md`](docs/baseline.md) | ratcheting, so these tools survive contact with a legacy codebase |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
 | [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |
@@ -223,6 +322,7 @@ someone in the wrong direction.
 ## Development
 
 ```bash
+uv run pytest                    # the analysis layer, 26 tests
 uv run python smoke_test.py      # introspection, called directly
 uv run python analysis_test.py   # the analysis tools, with assertions
 uv run python client_test.py     # the server over the real MCP transport

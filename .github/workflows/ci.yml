@@ -42,6 +42,15 @@ jobs:
       - name: Documented install path
         run: bash install_check.sh
 
+      - name: API contract lifecycle
+        run: bash contract_check.sh
+
+      - name: Call graph
+        run: bash callgraph_check.sh
+
+      - name: Escaping side effects
+        run: bash oncommit_check.sh
+
   dogfood:
     # The analyser run against its own demo project, which is the closest
     # thing to a real target this repository has.

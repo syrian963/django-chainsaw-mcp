@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Run the template analysis across a whole directory.
 
 analyse_template answers for one file with a context you supply by hand. That

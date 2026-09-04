@@ -72,6 +72,9 @@ Every tool here answers a question with a consequence:
 | Is this destructive migration safe to ship *yet*? | `deploy_safety` |
 | Which queries read rows the caller does not own? | `find_unscoped_queries` |
 | What does this save actually trigger? | `what_happens_on` |
+| Which fields does the code seek on without an index? | `missing_indexes` |
+| Which datetimes break when the clock moves? | `datetime_audit` |
+| What does the API expose that nobody decided to? | `serializer_exposure` |
 
 ## Static analysis, and being honest about it
 
@@ -149,6 +152,14 @@ src/django_chainsaw_mcp/
     deploy_safety.py  migrations against remaining code references
     tenancy.py        ownership paths, unscoped queryset detection
     signals.py        signal chain tracing through receiver bodies
+    indexes.py        queryset keys against the model's real indexes
+    datetimes.py      naive datetimes, frozen and ambiguous defaults
+    serializers.py    DRF field exposure
+    gitdiff.py        merge-base diff, narrowing findings to a branch
+    fixes.py          findings as code, classified by how safe they are
+    suggest.py        the same, serialised for MCP
+    check.py          runs everything, merges, sorts by severity
+    sarif.py          SARIF output for code-scanning UIs
     server.py         MCP tools and resource
     baseline.py       fingerprinting, ratcheting against a recorded state
     cli.py            subcommands and exit codes

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Cross-reference pending migrations against the code that still uses them.
 
 A migration linter classifies an operation in isolation: RemoveField is

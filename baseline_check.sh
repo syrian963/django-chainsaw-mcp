@@ -37,11 +37,15 @@ expect 0 "no baseline recorded yet" \
 expect 0 "record the baseline" \
   $BIN tenancy --tenant-root shop.Customer --baseline "$BL" --update-baseline
 
-recorded=$(python3 -c "import json,sys; print(json.load(open('$BL'))['checks']['tenancy']['count'])" 2>/dev/null)
-if [ "$recorded" = "4" ]; then
-  printf '  ok    %-46s %s findings\n' "baseline file contents" "$recorded"
+# Compare against what the tool itself reports rather than a fixed number, so
+# adding fixtures to the demo project does not break this check.
+reported=$($BIN --json tenancy --tenant-root shop.Customer 2>/dev/null \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['unscoped_count'])" 2>/dev/null)
+recorded=$(python3 -c "import json; print(json.load(open('$BL'))['checks']['tenancy']['count'])" 2>/dev/null)
+if [ -n "$recorded" ] && [ "$recorded" = "$reported" ]; then
+  printf '  ok    %-46s %s findings\n' "baseline matches what the tool reports" "$recorded"
 else
-  printf '  FAIL  %-46s got %s, expected 4\n' "baseline file contents" "$recorded"
+  printf '  FAIL  %-46s recorded=%s reported=%s\n' "baseline file contents" "$recorded" "$reported"
   fails=$((fails + 1))
 fi
 

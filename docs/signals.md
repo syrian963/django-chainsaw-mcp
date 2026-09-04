@@ -89,20 +89,57 @@ django-chainsaw delete-impact shop.Customer     # what the schema removes
 django-chainsaw signals shop.Customer --event delete   # what the code removes
 ```
 
+## Not only signals
+
+An overridden `save()` is not a signal. It is ordinary code, it runs on every
+write, before any `post_save` receiver does, and it is very often where the
+largest effect in the chain lives:
+
+```python
+class AuditedMixin(models.Model):
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        AuditEntry.objects.create(what=self.__class__.__name__)
+
+class Shipment(AuditedMixin):
+    ...          # nothing in this class says an audit row gets written
+```
+
+The chain walks the MRO for `save`/`delete` defined anywhere above the model
+and below `django.db.models.Model`, reads it the same way it reads a receiver,
+and follows whatever it writes. `"nothing else happens"` is the one answer this
+tool must never give wrongly.
+
+## Connected twice
+
+```
+duplicate_receivers:
+  shop.signals.audit_twice  connected 2 times
+      everything it does happens 2 times per event
+```
+
+Django's `connect()` deduplicates on the **identity** of the receiver, so
+connecting the same function object twice is a harmless no-op that never
+appears. The one that bites is a module imported under two names — once as
+`shop.signals`, once as `myproject.shop.signals` — which produces two distinct
+function objects Django cannot tell apart. The symptom is a side effect
+happening twice, which reads like a race and is not.
+
 ## What it cannot see
 
-- **Conditions.** A write inside `if created:` is reported as if it always
-  happens. The chain shows what *can* be triggered, not what will be on a
-  given call.
+- **Which way a condition goes.** A write inside `if created:` is marked
+  `conditional`, so the chain no longer overstates it, but whether that branch
+  is taken on a given call is a runtime question.
 - **Receivers connected at runtime**, after the app registry finished loading.
-- **Overridden `save()` methods** that write other models. Those are not
-  signals; they are ordinary code, and they are invisible here.
 - **Dynamic dispatch**, `getattr(obj, name)(), and writes through variables the
   AST cannot resolve to a model. Those are still reported as writes, with
   `resolved_model: null`, so the gap is visible rather than silent.
-- **Whether a receiver is registered twice.** Double registration is a common
-  bug; this reports what the registry contains, which will show duplicates but
-  does not call them out.
+- **A receiver connected after startup.** The registry is read once, after
+  `django.setup()`. One connected inside a request, a test fixture or a
+  conditional import is not in it.
 
 `unreadable_receivers` lists any receiver whose source could not be read at all,
 usually a lambda or a C callable, so they are not silently skipped.

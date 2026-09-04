@@ -104,15 +104,51 @@ Exits `1` on any candidate. On an existing codebase that will fire immediately,
 so the honest way to adopt it is to read the list once, fix or accept each
 entry, and only then turn on the gate for new code.
 
+## Scoped somewhere the line cannot show
+
+Two of these used to be blind spots and are now handled, because they are the
+two that produce the most convincing false positives:
+
+```python
+class TenantScopedViewSet(viewsets.ModelViewSet):
+    def get_queryset(self):
+        return super().get_queryset().filter(customer=self.request.user.customer)
+
+class OrderViewSet(TenantScopedViewSet):
+    queryset = Order.objects.all()      # scoped, and does not look it
+
+class LeakyOrderViewSet(viewsets.ModelViewSet):
+    queryset = Order.objects.all()      # the identical line, genuinely unscoped
+```
+
+The difference between those two lines is a base class the subclass never
+mentions. The check resolves the class hierarchy, finds the nearest ancestor
+defining `get_queryset`, and asks whether *that* narrows by an ownership key.
+
+The same applies to managers. `Order.objects` is a plain manager only by
+convention; if `objects` narrows on every access then every query through it is
+scoped and none of them look it.
+
+Neither case is silently dropped. Both are reported separately, with the reason:
+
+```
+2 query(s) ruled out because they are scoped somewhere the line cannot show:
+    shop/scoped.py:22  shop.Order
+        shop.scoped.TenantScopedViewSet.get_queryset() filters on the ownership
+        path 'customer', inherited by shop.scoped.OrderViewSet
+    shop/scoped.py:37  shop.ScopedNote
+        ScopedNoteManager.get_queryset() filters on the ownership path 'customer'
+```
+
+A suppression without a stated reason is just hiding a finding, and the reason
+can be wrong — a `get_queryset` that filters on `customer` from a *different*
+tenant is scoped by this test and still a leak. The list is there to be read.
+
 ## What it cannot see
 
 This is the part that decides whether the tool is useful or misleading, so it
 is stated in the output of every run:
 
-- **A filter in a base class or mixin.** `get_queryset()` on a shared
-  `TenantScopedViewSet` is invisible; every subclass looks unscoped.
-- **A custom manager.** `Order.objects` may already be scoped if `objects` is a
-  manager that filters by default.
 - **A filter further down the same function**, applied to a variable rather than
   chained onto the queryset.
 - **`Q()` objects and positional arguments.** Their contents cannot be read

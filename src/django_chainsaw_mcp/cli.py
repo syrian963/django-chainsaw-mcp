@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Command line entry point, so the analysis can gate a pipeline.
 
 The MCP server is for asking questions while working. CI needs the same checks
@@ -16,15 +19,30 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import baseline as _baseline
+from . import gitdiff as _gitdiff
+from . import sarif as _sarif
 from .cascade import delete_impact
+from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
+from .serializer_nplusone import serializer_nplusone
+from . import config as _config
+from . import fixes as _fixes
+from .datetimes import datetime_audit
+from .api_contract import CONTRACT_FILE, contract, diff as contract_diff
+from .api_contract import load_snapshot, write_snapshot
 from .deploy_safety import deploy_safety
+from .on_commit import escaping_side_effects
+from .endpoint_cost import endpoint_cost
+from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
+from .indexes import missing_indexes
 from .introspect import list_models
 from .migrations import migration_risk
 from .scan import scan_templates
+from .serializers import serializer_exposure
 from .signals import what_happens_on
 from .tenancy import find_unscoped_queries
 
@@ -38,12 +56,65 @@ def _bootstrap(args: argparse.Namespace) -> None:
         os.environ[PROJECT_PATH_VAR] = args.project_path
     if args.settings:
         os.environ[SETTINGS_MODULE_VAR] = args.settings
-    ensure_django(BootConfig.from_env())
+    config = ensure_django(BootConfig.from_env())
+
+    # pyproject.toml supplies what the flags did not. A flag always wins,
+    # because "why is it using the wrong tenant root" is a bad afternoon and
+    # the answer must be visible in the command that was typed.
+    project = _config.load(config.project_path)
+    args._project_config = project
+
+    if project.source:
+        if getattr(args, "tenant_root", None) == "auth.User" and project.tenant_root != "auth.User":
+            args.tenant_root = project.tenant_root
+        if getattr(args, "fail_on", None) == "high" and project.fail_on != "high":
+            args.fail_on = project.fail_on
+        if getattr(args, "baseline", None) is None and project.baseline:
+            args.baseline = project.baseline
+        if project.skip and not getattr(args, "skip", None):
+            args.skip = list(project.skip)
 
 
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
+
+
+def _restrict_to_changes(
+    args: argparse.Namespace,
+    findings: list[dict[str, Any]],
+    base_dir: Path,
+    key: str = "file",
+) -> tuple[list[dict[str, Any]], bool]:
+    """Narrow findings to files this branch touched.
+
+    Returns the findings to act on and whether narrowing happened, so the
+    caller can say so instead of silently reporting a smaller number.
+    """
+    ref = getattr(args, "since", None)
+    if not ref:
+        return findings, False
+
+    try:
+        diff = _gitdiff.changed_files(ref, base_dir)
+    except _gitdiff.GitError as exc:
+        print(f"warning: --since {ref} ignored, git said: {exc}", file=sys.stderr)
+        return findings, False
+
+    root = Path(diff["repo_root"])
+    matched, unmatchable = _gitdiff.filter_findings(
+        findings, set(diff["changed_files"]), base_dir, root, key=key
+    )
+
+    print(f"Since {ref} ({diff['strategy']}): "
+          f"{diff['changed_count']} changed file(s), "
+          f"{len(matched)} of {len(findings)} finding(s) fall in them")
+    if unmatchable:
+        print(f"  {len(unmatchable)} finding(s) could not be matched to a path and are kept:")
+        for finding in unmatchable[:5]:
+            print(f"    {finding.get(key, '?')}")
+    print()
+    return matched + unmatchable, True
 
 
 def _apply_baseline(check: str, report: dict[str, Any], args: argparse.Namespace) -> int | None:
@@ -93,6 +164,609 @@ def _apply_baseline(check: str, report: dict[str, Any], args: argparse.Namespace
             print(f"          {entry['summary']}")
         return EXIT_FINDINGS
 
+    return EXIT_OK
+
+
+def _cmd_cost(args: argparse.Namespace) -> int:
+    report = endpoint_cost(
+        page_size=args.page_size,
+        nested_fan_out=args.fan_out,
+        list_only=args.list_only,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["rest_framework_installed"]:
+            print("No DRF views are importable, nothing to estimate.")
+            return EXIT_OK
+        print(f"{report['endpoint_count']} endpoint(s), page size "
+              f"{report['page_size']}, assuming {report['nested_fan_out']} "
+              "child object(s) per parent")
+        print()
+        for endpoint in report["endpoints"]:
+            prefix = "at least " if endpoint["at_least"] else ""
+            print(f"  {endpoint['estimated_queries']:>8}  {prefix}"
+                  f"{endpoint['view']}  ({endpoint['kind']})")
+            if endpoint["location"]:
+                print(f"            {endpoint['location']}")
+            for item in endpoint["breakdown"]:
+                if item["queries"] == 0:
+                    continue
+                count = "?" if item["queries"] is None else item["queries"]
+                print(f"            {count:>8}  {item['reason']}")
+            print()
+        print(report["note"])
+
+    if args.max_queries is not None and report["worst_estimate"] > args.max_queries:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+_KIND_LABEL = {
+    "breaking": "BREAKS CLIENTS",
+    "unreadable": "COULD NOT BE READ",
+    "risky": "risky",
+    "additive": "safe",
+    "neutral": "no effect",
+}
+
+
+def _cmd_contract(args: argparse.Namespace) -> int:
+    captured = contract(max_depth=args.max_depth)
+
+    if not captured.get("rest_framework_installed"):
+        _emit(captured, args.json)
+        if not args.json:
+            print(captured["note"])
+        return EXIT_OK
+
+    if args.update:
+        written = write_snapshot(args.snapshot, captured)
+        _emit(written, args.json)
+        if not args.json:
+            print(f"Wrote {written['serializers']} serializer(s) to {written['snapshot']}")
+            print(written["note"])
+        return EXIT_OK
+
+    baseline = load_snapshot(args.snapshot)
+    if baseline is None:
+        message = {
+            "ok": False,
+            "snapshot": args.snapshot,
+            "error": (
+                "No contract snapshot yet. Run with --update on a branch whose "
+                "API shape is the one clients already use, then commit the file."
+            ),
+        }
+        _emit(message, args.json)
+        if not args.json:
+            print(message["error"])
+        return EXIT_ERROR
+
+    report = contract_diff(baseline, captured)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["change_count"]:
+            print("The API shape is unchanged.")
+            return EXIT_OK
+
+        summary = ", ".join(
+            f"{count} {_KIND_LABEL.get(kind, kind).lower()}"
+            for kind, count in report["by_kind"].items()
+        )
+        print(f"{report['change_count']} change(s) since the snapshot: {summary}")
+        print()
+        current_kind = None
+        for change in report["changes"]:
+            if change["kind"] != current_kind:
+                current_kind = change["kind"]
+                print(f"  {_KIND_LABEL.get(current_kind, current_kind)}")
+            print(f"    {change['path']}")
+            print(f"        {change['change']} - {change['why']}")
+        print()
+        print(report["note"])
+
+    # A serializer that no longer resolves also fails the gate. Its effect on
+    # clients is unknown, and an unknown is not a pass.
+    if args.fail_on_breaking and (report["breaking_count"] or report["unreadable_count"]):
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_oncommit(args: argparse.Namespace) -> int:
+    report = escaping_side_effects(
+        search_path=args.search_path,
+        include_low_confidence=args.include_low_confidence,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if report["atomic_requests_databases"]:
+            print("ATOMIC_REQUESTS is on for: "
+                  + ", ".join(report["atomic_requests_databases"]))
+            print("Every view runs inside a transaction, with no atomic() block")
+            print("anywhere in sight.")
+            print()
+            if report["atomic_request_view_count"]:
+                print(f"{report['atomic_request_view_count']} send(s) inside a view, "
+                      "wrapped by that setting alone:")
+                for entry in report["atomic_request_views"]:
+                    print(f"    {entry['file']}:{entry['line']}  {entry['kind']}")
+                    print(f"        {entry['code']}")
+                    print(f"        via {entry['view']}")
+                print()
+
+        if not report["finding_count"]:
+            print(f"No escaping side effects in {report['files_scanned']} file(s).")
+            return EXIT_OK
+
+        print(f"{report['finding_count']} call(s) inside a transaction that "
+              "cannot be rolled back")
+        print()
+        for finding in report["findings"]:
+            flag = " (low confidence)" if finding["confidence"] == "low" else ""
+            print(f"  {finding['severity'].upper():<6} {finding['file']}:{finding['line']}"
+                  f"  {finding['kind']}{flag}")
+            print(f"         {finding['code']}")
+            print(f"         inside {finding['inside']}")
+            if finding.get("reached_through"):
+                # The path is the actionable part. A finding in services.py is
+                # unactionable without the caller that made it a problem.
+                print("         path:  " + " -> ".join(finding["reached_through"]))
+            print(f"         {finding['consequence']}")
+            print(f"         fix: {finding['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_severity_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_fix(args: argparse.Namespace) -> int:
+    from .django_env import ensure_django
+
+    config = ensure_django()
+    root = Path(config.project_path)
+
+    reports = {}
+    if "datetimes" not in (args.skip or []):
+        reports["datetimes"] = datetime_audit()
+    if "serializers" not in (args.skip or []):
+        reports["serializers"] = serializer_exposure()
+    if "indexes" not in (args.skip or []):
+        reports["indexes"] = missing_indexes()
+    if "tenancy" not in (args.skip or []):
+        reports["tenancy"] = find_unscoped_queries(tenant_root=args.tenant_root)
+
+    fixset = _fixes.build_fixes(reports, root)
+
+    mechanical = fixset.by_kind(_fixes.MECHANICAL)
+    generated = fixset.by_kind(_fixes.GENERATED)
+    advisory = fixset.by_kind(_fixes.ADVISORY)
+
+    if args.json:
+        print(json.dumps(
+            {
+                "mechanical": [f.__dict__ for f in mechanical],
+                "generated": [f.__dict__ for f in generated],
+                "advisory": [f.__dict__ for f in advisory],
+            },
+            indent=2, default=str,
+        ))
+    else:
+        print(f"{len(mechanical)} mechanical, {len(generated)} generated, "
+              f"{len(advisory)} advisory")
+        print()
+
+        if mechanical:
+            print("MECHANICAL  one correct answer, safe to apply")
+            print("-" * 60)
+            for fix in mechanical:
+                print(f"  [{fix.check}] {fix.title}")
+                if fix.path:
+                    print(f"      {fix.path}:{fix.line}")
+                diff = fix.diff(root)
+                for line in diff.splitlines():
+                    if line.startswith(("+++", "---", "@@")):
+                        continue
+                    print(f"      {line}")
+                if fix.extra_import:
+                    print(f"      + {fix.extra_import}")
+                print()
+
+        if generated:
+            print("GENERATED  a machine can write it, a human decides if it should exist")
+            print("-" * 60)
+            for fix in generated:
+                print(f"  [{fix.check}] {fix.title}")
+                if fix.new_file:
+                    print(f"      would create {fix.new_file}")
+                if fix.why:
+                    print(f"      {fix.why}")
+                if fix.caution:
+                    print(f"      caution: {fix.caution}")
+                print()
+
+        if advisory:
+            print("ADVISORY  real code, but the decision is yours")
+            print("-" * 60)
+            for fix in advisory:
+                print(f"  [{fix.check}] {fix.title}")
+                if fix.path:
+                    print(f"      {fix.path}:{fix.line}")
+                if fix.old and fix.new:
+                    print(f"      - {fix.old.strip()}")
+                    print(f"      + {fix.new.strip()}")
+                elif fix.new:
+                    print(f"      {fix.new}")
+                if fix.caution:
+                    print(f"      caution: {fix.caution}")
+                print()
+
+    if args.write_generated and generated:
+        written = []
+        for fix in generated:
+            if not (fix.new_file and fix.new_file_content):
+                continue
+            target = root / fix.new_file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(fix.new_file_content, encoding="utf-8")
+            written.append(str(fix.new_file))
+        if written and not args.json:
+            print(f"Wrote {len(written)} generated file(s):")
+            for name in written:
+                print(f"  {name}")
+            print("Review them. Nothing here was applied to your existing code.")
+
+    if args.write:
+        result = _fixes.apply_mechanical(mechanical, root)
+        if not args.json:
+            print()
+            print(f"Applied to {len(result['changed_files'])} file(s): "
+                  f"{', '.join(result['changed_files']) or 'none'}")
+            for entry in result["skipped"]:
+                print(f"  skipped {entry['file']}: {entry['reason']}")
+            print()
+            print("Only the mechanical fixes were applied. Run your tests.")
+        return EXIT_OK
+
+    if not args.json and (mechanical or generated):
+        print("Nothing was changed. Add --write for the mechanical fixes, "
+              "--write-generated for the generated files.")
+
+    return EXIT_OK
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    from .django_env import ensure_django
+
+    report = run_all(tenant_root=args.tenant_root, only=args.only, skip=args.skip)
+
+    project = getattr(args, "_project_config", None) or _config.Config()
+    root = Path(ensure_django().project_path)
+
+    if project.ignore:
+        kept = [
+            f for f in report["findings"]
+            if not (f.get("location") and project.is_ignored(f["location"].split(":")[0]))
+        ]
+        ignored_count = len(report["findings"]) - len(kept)
+        report = dict(report, findings=kept, finding_count=len(kept))
+    else:
+        ignored_count = 0
+
+    split = _config.apply_suppressions(
+        [
+            {**f, "file": (f["location"] or "").split(":")[0],
+             "line": int(f["location"].split(":")[1])
+             if f.get("location") and ":" in f["location"]
+             and f["location"].split(":")[1].isdigit() else None}
+            for f in report["findings"]
+        ],
+        root,
+    )
+    report = dict(
+        report,
+        findings=split["findings"],
+        finding_count=len(split["findings"]),
+        suppressed=split["suppressed"],
+        refused_suppressions=split["refused_suppressions"],
+    )
+    counts: dict[str, int] = {}
+    for finding in report["findings"]:
+        counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
+    report["by_severity"] = counts
+
+    if args.sarif:
+        Path(args.sarif).write_text(_sarif.dumps(report), encoding="utf-8")
+
+    _emit(report, args.json)
+
+    if not args.json:
+        counts = report["by_severity"]
+        order = ["critical", "high", "medium", "low"]
+        line = ", ".join(f"{counts[s]} {s}" for s in order if counts.get(s))
+        print(f"{report['finding_count']} finding(s): {line or 'none'}")
+        print()
+
+        current = None
+        for finding in report["findings"]:
+            if finding["severity"] != current:
+                current = finding["severity"]
+                print(f"{current.upper()}")
+                print("-" * len(current))
+            location = finding["location"] or "-"
+            print(f"  [{finding['check']}] {finding['title']}")
+            print(f"      {location}")
+            if finding.get("detail"):
+                print(f"      {finding['detail']}")
+            if finding.get("fix"):
+                print(f"      fix: {finding['fix']}")
+            print()
+
+        if report.get("suppressed"):
+            print(f"{len(report['suppressed'])} finding(s) suppressed in the source:")
+            for entry in report["suppressed"][:10]:
+                print(f"  {entry.get('location') or '-'}  {entry['suppressed_because']}")
+            print()
+        if report.get("refused_suppressions"):
+            print("Suppressions that did NOT take effect:")
+            for entry in report["refused_suppressions"]:
+                print(f"  {entry.get('location') or '-'}  {entry['suppression_problem']}")
+            print()
+        if ignored_count:
+            print(f"{ignored_count} finding(s) hidden by the ignore patterns in "
+                  f"{project.source}")
+            print()
+
+        ran = report["checks_run"]
+        ok = [n for n, st in ran.items() if st["ok"]]
+        print(f"Ran {len(ok)} check(s): {', '.join(ok)}")
+        if project.source:
+            print(f"Settings from {project.source}")
+        if report["checks_failed"]:
+            print()
+            print("These checks could NOT run, so their area is unverified:")
+            for name in report["checks_failed"]:
+                print(f"  {name}: {ran[name]['error']}")
+
+        if args.sarif:
+            print()
+            print(f"SARIF written to {args.sarif}")
+
+    # A check that could not run is not a pass.
+    if report["checks_failed"] and args.strict:
+        return EXIT_ERROR
+    if gate(report, args.fail_on):
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_serializer_nplusone(args: argparse.Namespace) -> int:
+    report = serializer_nplusone(max_depth=args.max_depth)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["rest_framework_installed"]:
+            print("djangorestframework is not importable here, nothing to inspect.")
+            return EXIT_OK
+        print(f"{report['serializer_count']} serializer(s), "
+              f"{report['finding_count']} finding(s), "
+              f"{report['high_severity_count']} high")
+        print()
+        for finding in report["findings"]:
+            print(f"  {finding['severity']:<7} {finding['serializer']}.{finding['field']}")
+            print(f"          {finding.get('location') or '-'}  {finding['why']}")
+            if finding.get("suggested"):
+                print(f"          {finding['suggested']}")
+            print()
+        if report["queryset_advice"]:
+            print("Queryset changes, per serializer:")
+            for name, advice in sorted(report["queryset_advice"].items()):
+                parts = []
+                if advice["select_related"]:
+                    parts.append("select_related(" + ", ".join(repr(x) for x in advice["select_related"]) + ")")
+                if advice["prefetch_related"]:
+                    parts.append("prefetch_related(" + ", ".join(repr(x) for x in advice["prefetch_related"]) + ")")
+                print(f"  {name}")
+                print(f"      .{'.'.join(parts)}")
+        for entry in report["unreadable_serializers"]:
+            print(f"  (unreadable) {entry['serializer']}: {entry['unreadable']}")
+
+    if args.max_high is not None and report["high_severity_count"] > args.max_high:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_explain(args: argparse.Namespace) -> int:
+    report = explain_model(
+        args.model, tenant_root=args.tenant_root, include_raw=args.raw
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        print(report["model"])
+        print("=" * len(report["model"]))
+        print(report["summary"])
+        print()
+
+        structure = report["structure"]
+        print(f"Table {structure['db_table']}, {structure['field_count']} field(s)")
+        for relation in structure["relations"]:
+            arrow = "->" if relation["direction"] == "forward" else "<-"
+            suffix = f"  {relation['on_delete']}" if relation.get("on_delete") else ""
+            print(f"    {relation['field']:<18} {relation['kind']:<11} {arrow} "
+                  f"{relation['to']}{suffix}")
+        print()
+
+        ownership = report["ownership"]
+        if ownership.get("path"):
+            print(f"Owned via '{ownership['path']}' ({ownership['depth']} hop(s))")
+        else:
+            print("Not owned by the tenant root")
+        print()
+
+        delete = report["on_delete"]
+        print(f"On delete: {delete['summary']}")
+        for row in delete["cascades"]:
+            print(f"    cascades into {row['from_model']} via {row['via_field']}")
+        for row in delete["blocked_by"]:
+            print(f"    blocked by {row['from_model']}.{row['via_field']} ({row['on_delete']})")
+        if delete["signal_receivers"]:
+            print(f"    plus {delete['signal_receivers']} signal receiver(s)")
+        print()
+
+        save = report["on_save"]
+        if save["receiver_count"]:
+            print(f"On save: {save['receiver_count']} receiver(s), "
+                  f"writes {', '.join(save['models_written']) or 'nothing'}")
+            for effect in save["side_effects"]:
+                print(f"    {effect['kind']}: {effect['call']}()")
+            print()
+
+        if report["api_exposure"]:
+            print("API exposure:")
+            for finding in report["api_exposure"]:
+                print(f"    {finding['serializer']}  mode {finding['mode']}")
+                for entry in finding.get("sensitive", []):
+                    print(f"      ! {entry['field']}  ({entry['category']})")
+            print()
+
+        if report["performance"]["unindexed_fields"]:
+            print("Filtered or sorted without an index:")
+            for finding in report["performance"]["unindexed_fields"]:
+                print(f"    {finding['field']}  ({finding['occurrences']}x, "
+                      f"{', '.join(finding['methods'])})")
+            print()
+
+        if report["datetime_fields"]:
+            print("Datetime fields:")
+            for finding in report["datetime_fields"]:
+                print(f"    {finding['field']}: {finding['detail']}")
+            print()
+
+        risks = report["correlated_risks"]
+        if risks:
+            print("CORRELATED RISKS")
+            print("-" * 60)
+            print("Only visible by combining analyses. No single check sees these.")
+            print()
+            for risk in risks:
+                print(f"  [{risk['severity'].upper()}] {risk['title']}")
+                print(f"      {risk['detail']}")
+                print(f"      seen by: {', '.join(risk['seen_by'])}")
+                print()
+
+    if args.fail_on_critical and any(
+        r["severity"] == "critical" for r in report["correlated_risks"]
+    ):
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_serializers(args: argparse.Namespace) -> int:
+    report = serializer_exposure(include_safe=args.include_safe)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["rest_framework_installed"]:
+            print("djangorestframework is not importable here, nothing to inspect.")
+            print(report["note"])
+            return EXIT_OK
+
+        print(f"{report['serializer_count']} ModelSerializer subclass(es), "
+              f"{report['finding_count']} finding(s), "
+              f"{report['high_severity_count']} high")
+        print()
+        for finding in report["findings"]:
+            print(f"  {finding['severity']:<7} {finding['serializer']}")
+            print(f"          {finding['model']}, mode {finding['mode']}, "
+                  f"{finding['exposed_count']} field(s)")
+            for entry in finding["sensitive"]:
+                print(f"            ! {entry['field']}  ({entry['category']})")
+            print(f"          {finding['why']}")
+            print(f"          {finding['suggested']}")
+            print()
+        for entry in report.get("explicit_and_clean", []):
+            print(f"  ok      {entry['serializer']}  ({entry['exposed_count']} field(s))")
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_datetimes(args: argparse.Namespace) -> int:
+    report = datetime_audit(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"USE_TZ = {report['use_tz']}, files scanned: {report['files_scanned']}")
+        if not report["use_tz"]:
+            print("USE_TZ is off, so the code findings are informational.")
+        print()
+        if report["model_findings"]:
+            print("Model fields:")
+            for finding in report["model_findings"]:
+                print(f"  {finding['severity']:<7} {finding['model']}.{finding['field']}")
+                print(f"          {finding['detail']}")
+                print(f"          use: {finding['suggested']}")
+            print()
+        if report["code_findings"]:
+            print("Code:")
+            for finding in report["code_findings"]:
+                print(f"  {finding['severity']:<7} {finding['file']}:{finding['line']}  "
+                      f"{finding['call']}")
+                print(f"          {finding['code']}")
+                print(f"          use: {finding['suggested']}")
+            print()
+        print(f"{report['total']} finding(s), {report['high_severity_count']} high")
+
+    if args.fail_on_findings and report["total"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_indexes(args: argparse.Namespace) -> int:
+    report = missing_indexes(
+        search_path=args.search_path,
+        min_occurrences=args.min_occurrences,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"Files scanned: {report['files_scanned']}, "
+              f"candidates: {report['candidate_count']} "
+              f"({report['high_severity_count']} high)")
+        if report["ignored_lookups"]:
+            ignored = ", ".join(f"{k}={v}" for k, v in sorted(report["ignored_lookups"].items()))
+            print(f"Ignored, no btree index would help: {ignored}")
+        print()
+        for finding in report["findings"]:
+            print(f"  {finding['severity']:<7} {finding['model']}.{finding['field']}  "
+                  f"({finding['field_type']}, {finding['occurrences']}x, "
+                  f"{', '.join(finding['methods'])})")
+            for use in finding["used_at"][:4]:
+                print(f"          {use['file']}:{use['line']}  {use['code']}")
+            print(f"          {finding['suggested_model_change']}")
+            print()
+
+    if getattr(args, "since", None):
+        base = Path(report["search_path"])
+        kept = []
+        for finding in report["findings"]:
+            uses, _ = _restrict_to_changes(
+                argparse.Namespace(since=args.since), finding["used_at"], base
+            )
+            if uses:
+                kept.append(dict(finding, used_at=uses, occurrences=len(uses)))
+        report = dict(report, findings=kept, candidate_count=len(kept),
+                      high_severity_count=sum(1 for f in kept if f["severity"] == "high"))
+        print(f"{len(kept)} candidate(s) touched by changed files")
+
+    if args.max_candidates is not None and report["candidate_count"] > args.max_candidates:
+        return EXIT_FINDINGS
     return EXIT_OK
 
 
@@ -158,6 +832,24 @@ def _cmd_tenancy(args: argparse.Namespace) -> int:
         print(f"{report['unscoped_count']} candidate(s), "
               f"{report['high_severity_count']} at one hop from the owner")
 
+        # Shown rather than silently dropped. A reviewer needs to see what was
+        # ruled out and on what grounds, because the grounds can be wrong.
+        if report["scoped_elsewhere_count"]:
+            print()
+            print(f"{report['scoped_elsewhere_count']} query(s) ruled out because "
+                  "they are scoped somewhere the line cannot show:")
+            for entry in report["scoped_elsewhere"]:
+                print(f"    {entry['file']}:{entry['line']}  {entry['model']}")
+                print(f"        {entry['detail']}")
+
+    findings, narrowed = _restrict_to_changes(
+        args, report["findings"], Path(report["search_path"])
+    )
+    if narrowed:
+        report = dict(report, findings=findings, unscoped_count=len(findings),
+                      high_severity_count=sum(1 for f in findings if f["severity"] == "high"))
+        print(f"{report['unscoped_count']} candidate(s) in changed files")
+
     decided = _apply_baseline("tenancy", report, args)
     if decided is not None:
         return decided
@@ -191,6 +883,15 @@ def _cmd_deploy_safety(args: argparse.Namespace) -> int:
                 print(f"              {ref['path']}:{ref['line']}  [{ref['kind']}]")
         print()
         print(f"{report['blocking_count']} blocking, {report['clear_count']} clear")
+
+    if getattr(args, "since", None):
+        entries = [
+            dict(entry, file=f"{entry['app']}/migrations/{entry['migration']}.py")
+            for entry in report["blocking"]
+        ]
+        kept, _ = _restrict_to_changes(args, entries, Path(report["search_path"]))
+        report = dict(report, blocking=kept, blocking_count=len(kept))
+        print(f"{len(kept)} blocking migration(s) added by this branch")
 
     decided = _apply_baseline("deploy-safety", report, args)
     if decided is not None:
@@ -237,6 +938,18 @@ def _cmd_nplusone(args: argparse.Namespace) -> int:
                 print(f"      -> .{'.'.join(parts)}")
             print()
         print(f"{report['high_severity_total']} high severity candidate(s)")
+
+    results, narrowed = _restrict_to_changes(
+        args, report["results"], Path(report["template_root"]), key="template"
+    )
+    if narrowed:
+        report = dict(
+            report,
+            results=results,
+            templates_with_findings=len(results),
+            high_severity_total=sum(r["high_severity_count"] for r in results),
+        )
+        print(f"{report['high_severity_total']} high severity candidate(s) in changed templates")
 
     decided = _apply_baseline("n+1", report, args)
     if decided is not None:
@@ -327,6 +1040,92 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if more than N high severity candidates are found")
     p.set_defaults(func=_cmd_nplusone)
 
+    p = sub.add_parser("cost", help="estimated queries per request, per endpoint")
+    p.add_argument("--page-size", type=int, default=50)
+    p.add_argument("--fan-out", type=int, default=5,
+                   help="assumed child objects per parent for nested levels")
+    p.add_argument("--list-only", action="store_true", help="skip detail views")
+    p.add_argument("--max-queries", type=int, metavar="N",
+                   help="exit 1 if the worst endpoint is above N")
+    p.set_defaults(func=_cmd_cost)
+
+    p = sub.add_parser("contract", help="what this branch changes about the API")
+    p.add_argument("--snapshot", default=CONTRACT_FILE,
+                   help="the committed contract to compare against")
+    p.add_argument("--update", action="store_true",
+                   help="overwrite the snapshot with the current shape")
+    p.add_argument("--max-depth", type=int, default=3,
+                   help="how far to expand nested serializers")
+    p.add_argument("--fail-on-breaking", action="store_true",
+                   help="exit 1 if any change breaks an existing client")
+    p.set_defaults(func=_cmd_contract)
+
+    p = sub.add_parser("on-commit",
+                       help="side effects inside a transaction that cannot be rolled back")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--include-low-confidence", action="store_true",
+                   help="also report calls guessed from the name, such as .send()")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 if any high-severity call escapes a transaction")
+    p.set_defaults(func=_cmd_oncommit)
+
+    p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
+    p.add_argument("--skip", action="append", metavar="CHECK",
+                   help="skip a check, repeatable")
+    p.add_argument("--write", action="store_true",
+                   help="apply the mechanical fixes to your files")
+    p.add_argument("--write-generated", action="store_true",
+                   help="write the generated files, such as index migrations")
+    p.set_defaults(func=_cmd_fix)
+
+    p = sub.add_parser("check", help="run every analysis and return one answer")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
+    p.add_argument("--only", action="append", choices=list(ALL_CHECKS), metavar="CHECK",
+                   help=f"run just this check, repeatable. One of: {', '.join(ALL_CHECKS)}")
+    p.add_argument("--skip", action="append", choices=list(ALL_CHECKS), metavar="CHECK",
+                   help="run everything except this check, repeatable")
+    p.add_argument("--fail-on", default=GATE_DEFAULT,
+                   choices=["critical", "high", "medium", "low"],
+                   help=f"exit 1 at or above this severity (default: {GATE_DEFAULT})")
+    p.add_argument("--strict", action="store_true",
+                   help="exit 2 if any check failed to run, instead of reporting the rest")
+    p.add_argument("--sarif", metavar="FILE",
+                   help="also write SARIF, so a code-scanning UI can annotate the diff")
+    p.set_defaults(func=_cmd_check)
+
+    p = sub.add_parser("n+1-serializer", help="N+1 in DRF serializers")
+    p.add_argument("--max-depth", type=int, default=3, help="how far to follow nested serializers")
+    p.add_argument("--max-high", type=int, metavar="N", help="exit 1 above N high severity findings")
+    p.set_defaults(func=_cmd_serializer_nplusone)
+
+    p = sub.add_parser("explain", help="everything about one model, plus correlated risks")
+    p.add_argument("model", help="app_label.ModelName")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
+    p.add_argument("--raw", action="store_true", help="attach every analyser's full report")
+    p.add_argument("--fail-on-critical", action="store_true",
+                   help="exit 1 if a correlated risk is critical")
+    p.set_defaults(func=_cmd_explain)
+
+    p = sub.add_parser("serializers", help="what DRF serializers expose")
+    p.add_argument("--include-safe", action="store_true",
+                   help="also list serializers with an explicit, clean field list")
+    p.add_argument("--fail-on-findings", action="store_true", help="exit 1 on any finding")
+    p.set_defaults(func=_cmd_serializers)
+
+    p = sub.add_parser("datetimes", help="naive datetimes and ambiguous field defaults")
+    p.add_argument("--search-path", help="directory to scan")
+    p.add_argument("--fail-on-findings", action="store_true", help="exit 1 on any finding")
+    p.set_defaults(func=_cmd_datetimes)
+
+    p = sub.add_parser("indexes", help="fields filtered or sorted on without an index")
+    p.add_argument("--search-path", help="directory to scan")
+    p.add_argument("--min-occurrences", type=int, default=1,
+                   help="only report a field asked for at least this often")
+    p.add_argument("--max-candidates", type=int, metavar="N",
+                   help="exit 1 if more than N candidates are found")
+    p.set_defaults(func=_cmd_indexes)
+
     p = sub.add_parser("signals", help="what a save or delete actually triggers")
     p.add_argument("model", help="app_label.ModelName")
     p.add_argument("--event", choices=["save", "delete"], default="save")
@@ -358,6 +1157,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--app", help="restrict to one app label")
     p.add_argument("--short", action="store_true", help="omit field details")
     p.set_defaults(func=_cmd_models)
+
+    for name in ("deploy-safety", "n+1", "tenancy", "indexes"):
+        sub.choices[name].add_argument(
+            "--since", metavar="REF",
+            help="only report findings in files changed since REF, compared at "
+                 "the merge base so the branch is not blamed for other people's work")
 
     for name in ("deploy-safety", "n+1", "tenancy"):
         target = sub.choices[name]

@@ -4,17 +4,20 @@ import json
 import os
 from pathlib import Path
 
-os.environ.setdefault("DJANGO_CHAINSAW_PROJECT_PATH", "testprojects")
+# Anchored on this file, not on the caller's working directory.
+ROOT = Path(__file__).resolve().parent
+
+os.environ.setdefault("DJANGO_CHAINSAW_PROJECT_PATH", str(ROOT / "testprojects"))
 os.environ.setdefault("DJANGO_CHAINSAW_SETTINGS_MODULE", "demoshop.settings")
 
 from django_chainsaw_mcp.cascade import delete_impact  # noqa: E402
 from django_chainsaw_mcp.deploy_safety import deploy_safety  # noqa: E402
 from django_chainsaw_mcp.migrations import migration_risk  # noqa: E402
 from django_chainsaw_mcp.nplusone import analyse_template  # noqa: E402
+from django_chainsaw_mcp.indexes import missing_indexes  # noqa: E402
 from django_chainsaw_mcp.signals import what_happens_on  # noqa: E402
 from django_chainsaw_mcp.tenancy import find_unscoped_queries  # noqa: E402
 
-ROOT = Path(__file__).parent
 failures: list[str] = []
 
 
@@ -170,20 +173,28 @@ check("shop.Product" not in owned, "Product does not belong to a Customer and mu
 check("shop.Category" not in owned, "Category does not belong to a Customer")
 
 flagged = {(f["file"], f["line"]) for f in tenancy["findings"]}
-lines = sorted(line for _, line in flagged)
 
-check(tenancy["unscoped_count"] == 4,
-      f"expected exactly the 4 unscoped views, got {tenancy['unscoped_count']} at lines {lines}")
+# Assertions are scoped to api.py, which was written for this check. Counting
+# every finding in the project makes the test fail whenever the project grows,
+# and that trains people to edit the number instead of reading the failure.
+api_findings = [f for f in tenancy["findings"] if f["file"].endswith("api.py")]
+api_lines = sorted(f["line"] for f in api_findings)
+
+check(api_lines == [14, 19, 24, 29],
+      f"api.py has exactly four unscoped views, got lines {api_lines}")
 check(len(flagged) == len(tenancy["findings"]),
       "each queryset must be reported once; ast.walk visits inner and outer calls")
-check(tenancy["high_severity_count"] == 2,
-      f"two of them are one hop from the owner, got {tenancy['high_severity_count']}")
-
-scoped_lines = {34, 38, 42, 47}
-check(not (scoped_lines & {line for _, line in flagged}),
-      f"the correctly scoped views must not be flagged, got {sorted(flagged)}")
+check(sum(1 for f in api_findings if f["severity"] == "high") == 2,
+      "two of the api.py findings are one hop from the owner")
 check(all(f["model"] != "shop.Product" for f in tenancy["findings"]),
       "Product.objects.all() is legitimate and must not be flagged")
+check(all("create" not in f["chain"] for f in tenancy["findings"]),
+      "inserting a row cannot leak data and must not be reported")
+
+# The three in reports.py are genuine: they read tenant data across customers.
+report_lines = sorted(f["line"] for f in tenancy["findings"] if f["file"].endswith("reports.py"))
+check(report_lines == [38, 42, 54],
+      f"reports.py has three genuine cross-customer reads, got {report_lines}")
 
 print()
 print("=" * 70)
@@ -223,6 +234,39 @@ check(delete_chain["receiver_count"] == 1,
       f"one post_delete receiver on Order, got {delete_chain['receiver_count']}")
 check(not delete_chain["models_written"],
       f"the delete receiver writes no model, got {delete_chain['models_written']}")
+
+print()
+print("=" * 70)
+print("missing_indexes")
+print("=" * 70)
+idx = missing_indexes()
+print("candidates:", idx["candidate_count"], "| high:", idx["high_severity_count"],
+      "| ignored lookups:", idx["ignored_lookups"])
+for f in idx["findings"]:
+    print("  {:<7} {}.{:<12} {:<22} {}x  {}".format(
+        f["severity"], f["model"], f["field"], f["field_type"],
+        f["occurrences"], ", ".join(f["methods"])))
+
+flagged = {(f["model"], f["field"]) for f in idx["findings"]}
+
+check(("shop.Product", "name") in flagged, "Product.name has no index and is filtered on")
+check(("shop.Product", "price") in flagged, "Product.price has no index")
+check(("shop.Order", "placed_at") in flagged, "Order.placed_at has no index")
+
+# Everything the database can already seek on must stay out.
+check(("shop.Product", "sku") not in flagged, "sku is unique and db_index=True")
+check(("shop.Invoice", "number") not in flagged, "Invoice.number is unique")
+check(("shop.OrderLine", "order") not in flagged, "a ForeignKey is indexed by Django")
+check(("shop.Category", "name") not in flagged, "Category.name is unique")
+
+name_finding = next((f for f in idx["findings"] if f["field"] == "name"
+                     and f["model"] == "shop.Product"), None)
+check(name_finding is not None and name_finding["severity"] == "high",
+      "Product.name is asked for three times including order_by, so high")
+check(name_finding is not None and "order_by" in name_finding["methods"],
+      f"order_by must be recorded, got {name_finding['methods'] if name_finding else None}")
+check(idx["ignored_lookups"].get("icontains") == 1,
+      f"icontains cannot use a btree index and must be ignored, got {idx['ignored_lookups']}")
 
 print()
 print("=" * 70)

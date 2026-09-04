@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Find relation traversals in templates that will each cost a query.
 
 The classic N+1 in Django is a template looping over a queryset and reaching

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Compare today's findings against a recorded baseline.
 
 Every analyser here has the same adoption problem. Point `tenancy` at a five

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Find querysets that read tenant-scoped data without scoping the query.
 
 This is the bug class behind most IDOR reports: a view loads an object by
@@ -30,10 +33,12 @@ vulnerability.
 from __future__ import annotations
 
 import ast
+import textwrap
 from collections import deque
 from pathlib import Path
 from typing import Any, Iterable
 
+from . import callgraph
 from .django_env import ensure_django
 
 # Chain methods that can carry a scoping filter.
@@ -153,6 +158,169 @@ def _is_scoped(keys: Iterable[str], path: str | None) -> tuple[bool, str]:
     return False, ""
 
 
+def _filter_keys_in(node: ast.AST) -> set[str]:
+    """Every filter key applied anywhere inside a function body.
+
+    Deliberately cruder than _unwind: the point here is only whether the
+    method narrows by ownership at all, and the usual shape is
+    `super().get_queryset().filter(customer=...)`, whose base is a call rather
+    than a model name, so _unwind declines it.
+    """
+    keys: set[str] = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call) or not isinstance(child.func, ast.Attribute):
+            continue
+        if child.func.attr not in _FILTERING:
+            continue
+        for keyword in child.keywords:
+            if keyword.arg:
+                keys.add(keyword.arg)
+        if child.args:
+            keys.add("<positional>")
+    return keys
+
+
+def _class_filter_keys(graph: "callgraph.CallGraph", root: Path) -> dict[str, tuple[set[str], str]]:
+    """For each class, the keys its get_queryset narrows by, inherited included.
+
+    This closes the mixin case. `class OrderViewSet(TenantScopedViewSet)` with
+    `queryset = Order.objects.all()` on it reads as unscoped on the line the
+    analysis sees, and is scoped on every request by a base class that the
+    subclass never mentions. Reporting it is how an authorisation check earns
+    a reputation for crying wolf.
+    """
+    parsed: dict[str, ast.AST] = {}
+    out: dict[str, tuple[set[str], str]] = {}
+
+    for qualname in graph.classes:
+        for ancestor in graph.ancestors(qualname):
+            fn = graph.functions.get(f"{ancestor}.get_queryset")
+            if fn is None:
+                continue
+            tree = parsed.get(fn.file)
+            if tree is None:
+                try:
+                    tree = ast.parse((root / fn.file).read_text(encoding="utf-8", errors="replace"))
+                except (OSError, SyntaxError):
+                    continue
+                parsed[fn.file] = tree
+            node = next(
+                (
+                    n for n in ast.walk(tree)
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and n.name == "get_queryset" and n.lineno == fn.line
+                ),
+                None,
+            )
+            if node is None:
+                continue
+            keys = _filter_keys_in(node)
+            if keys:
+                out[qualname] = (keys, ancestor)
+                break
+
+    return out
+
+
+def _scoped_managers(paths: dict[str, Any]) -> dict[str, str]:
+    """Models whose default manager already narrows by ownership.
+
+    `Order.objects` is only a plain manager by convention. If `objects` is a
+    manager whose get_queryset filters, then every `Order.objects.all()` in
+    the project is scoped and none of them look it.
+    """
+    import inspect
+
+    from django.apps import apps
+    from django.db.models import Manager
+
+    out: dict[str, str] = {}
+    for model in apps.get_models():
+        label = model._meta.label
+        ownership = paths.get(label)
+        if not ownership or ownership.get("path") is None:
+            continue
+        manager = getattr(model, "_default_manager", None)
+        if manager is None or type(manager) is Manager:
+            continue
+        get_queryset = getattr(type(manager), "get_queryset", None)
+        if get_queryset is None or get_queryset is Manager.get_queryset:
+            continue
+        try:
+            source = inspect.getsource(get_queryset)
+            node = ast.parse(textwrap.dedent(source))
+        except (OSError, TypeError, SyntaxError, IndentationError):
+            continue
+        keys = _filter_keys_in(node)
+        scoped, reason = _is_scoped(keys, ownership["path"])
+        if scoped and keys:
+            out[label] = f"{type(manager).__name__}.get_queryset() {reason}"
+    return out
+
+
+_PERMISSION_HINTS = (
+    "has_object_permission", "check_object_permissions", "get_object_or_404",
+    "has_perm", "user_can", "can_access", "ensure_owner", "assert_owner",
+)
+
+
+def _enclosing_function(tree: ast.AST, line: int) -> ast.AST | None:
+    """The innermost def containing this line."""
+    best = None
+    best_span = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        end = node.end_lineno or node.lineno
+        if not (node.lineno <= line <= end):
+            continue
+        span = end - node.lineno
+        if best_span is None or span < best_span:
+            best, best_span = node, span
+    return best
+
+
+def _narrowed_later(tree: ast.AST, line: int, path: str) -> str | None:
+    """A filter applied further down the same function, to a variable.
+
+        orders = Order.objects.all()
+        if not request.user.is_staff:
+            orders = orders.filter(customer=request.user.customer)
+
+    The first line is what the analysis sees and it is not the whole story.
+    Reading the rest of the function is cheap and removes a whole class of
+    false positive. It is deliberately generous: any ownership filter anywhere
+    below counts, because the cost of missing one real leak is lower than the
+    cost of a check nobody trusts.
+    """
+    function = _enclosing_function(tree, line)
+    if function is None:
+        return None
+    keys = {k for k in _filter_keys_in(function) if k != "<positional>"}
+    scoped, reason = _is_scoped(keys, path)
+    return reason if scoped else None
+
+
+def _guarded_after_fetch(tree: ast.AST, line: int) -> str | None:
+    """An object-level permission check after loading by primary key.
+
+    Loading a row and then asking a permission class about it is a legitimate
+    pattern and reads as unscoped. Naming the guard is not proof it is correct,
+    so this downgrades the finding rather than removing it.
+    """
+    function = _enclosing_function(tree, line)
+    if function is None:
+        return None
+    for node in ast.walk(function):
+        name = ""
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name and any(hint in name for hint in _PERMISSION_HINTS):
+            return name
+    return None
+
+
 def _iter_python(root: Path) -> Iterable[Path]:
     for path in root.rglob("*.py"):
         if any(part in _SKIP_DIRS for part in path.parts):
@@ -188,6 +356,11 @@ def find_unscoped_queries(
 
     paths = _ownership_paths(tenant_root, max_depth)
     by_class = {m.__name__: m._meta.label for m in apps.get_models()}
+
+    graph = callgraph.build(root_dir)
+    class_keys = _class_filter_keys(graph, root_dir)
+    scoped_managers = _scoped_managers(paths)
+    suppressed: list[dict[str, Any]] = []
 
     findings: list[dict[str, Any]] = []
     scanned = 0
@@ -234,6 +407,48 @@ def find_unscoped_queries(
             if scoped:
                 continue
 
+            # The two cases that are scoped somewhere the line cannot show.
+            # They are recorded rather than dropped, so a reviewer can see
+            # what was ruled out and on what grounds.
+            relative = str(file_path.relative_to(root_dir))
+
+            if label in scoped_managers:
+                suppressed.append({
+                    "file": relative, "line": node.lineno, "model": label,
+                    "scoped_by": "default manager",
+                    "detail": scoped_managers[label],
+                })
+                continue
+
+            later = _narrowed_later(tree, node.lineno, ownership["path"])
+            if later:
+                suppressed.append({
+                    "file": relative, "line": node.lineno, "model": label,
+                    "scoped_by": "a filter further down the same function",
+                    "detail": later,
+                })
+                continue
+
+            enclosing = graph.class_at(relative, node.lineno)
+            if enclosing and enclosing in class_keys:
+                inherited_keys, source_class = class_keys[enclosing]
+                inherited_scoped, inherited_reason = _is_scoped(
+                    inherited_keys, ownership["path"]
+                )
+                if inherited_scoped:
+                    suppressed.append({
+                        "file": relative, "line": node.lineno, "model": label,
+                        "scoped_by": "get_queryset()",
+                        "detail": (
+                            f"{source_class}.get_queryset() {inherited_reason}"
+                            + ("" if source_class == enclosing
+                               else f", inherited by {enclosing}")
+                        ),
+                    })
+                    continue
+
+            guard = _guarded_after_fetch(tree, node.lineno)
+
             # An entry point that returns rows without narrowing them.
             terminal = [m for m in methods if m in _UNSCOPED_ENTRY or m in _FILTERING]
             findings.append(
@@ -245,6 +460,7 @@ def find_unscoped_queries(
                     "owner_path": ownership["path"],
                     "hops": ownership["depth"],
                     "chain": ".".join(methods) or "(none)",
+                    "permission_check_nearby": guard,
                     "filter_keys": keys,
                     "severity": "high" if ownership["depth"] == 1 else "medium",
                     "why": (
@@ -280,6 +496,8 @@ def find_unscoped_queries(
         "files_scanned": scanned,
         "queryset_chains_seen": chains_seen,
         "tenant_scoped_models": owned,
+        "scoped_elsewhere": suppressed,
+        "scoped_elsewhere_count": len(suppressed),
         "unscoped_count": len(findings),
         "high_severity_count": sum(1 for f in findings if f["severity"] == "high"),
         "findings": findings,

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Classify pending migrations by what they do to a live database.
 
 Django tells you which migrations are unapplied. It does not tell you which of

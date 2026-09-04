@@ -17,7 +17,11 @@ uv run python smoke_test.py      # introspection functions, called directly
 uv run python analysis_test.py   # the analysis tools, with assertions
 uv run python client_test.py     # the server over the real MCP transport
 bash exitcheck.sh                # CLI exit codes
+bash portability_check.sh        # no host paths in tracked files
 bash baseline_check.sh           # the baseline lifecycle end to end
+bash since_check.sh              # --since against a real throwaway git repo
+bash fix_check.sh                # the --write safety boundary
+uv run pytest                    # the analysis layer
 bash install_check.sh            # the documented install path, in a fresh venv
 ```
 
@@ -85,6 +89,15 @@ obvious. Several entries in the README came straight out of commit messages.
 
 ## Style
 
+- **No absolute paths anywhere in the repository.** Shell scripts start with
+  `cd "$(dirname "$0")"`, Python anchors on `Path(__file__)`, and the server
+  takes its target from environment variables. `portability_check.sh` enforces
+  this; it is a tool other people install, and a path to somebody's home
+  directory is the kind of defect that survives review because it still works
+  for the author.
+- **Do not assert on a project-wide count.** `unscoped_count == 4` breaks the
+  moment somebody adds a fixture, and the reflex is to edit the number rather
+  than read the failure. Assert on the file the check was written for.
 - No em dashes.
 - Comments explain why, not what.
 - German is fine in test output; documentation and code are English.

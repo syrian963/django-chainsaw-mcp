@@ -24,6 +24,46 @@ Commands only return `1` when a gate is requested. Without a gate they are
 reporting tools and always exit `0`, so adding one to a pipeline never breaks it
 by surprise.
 
+## `check`, the one to start with
+
+```bash
+django-chainsaw check [--tenant-root app.Model] [--only CHECK] [--skip CHECK]
+                      [--fail-on critical|high|medium|low] [--strict] [--sarif FILE]
+```
+
+Runs every analysis whose findings are defects, merges them into one list sorted
+worst first, and returns one exit code. `--fail-on` defaults to `high`.
+
+**`--strict` exits 2 if a check could not run.** Without it a failed check is
+listed but the others still report, which is usually what you want
+interactively and never what you want in CI: a check that crashed is not a pass.
+
+**`--sarif FILE`** writes the findings in the format code-scanning UIs read, so
+they appear as annotations on the diff rather than in a log.
+
+```yaml
+- run: django-chainsaw check --sarif chainsaw.sarif --fail-on critical
+  continue-on-error: true
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: chainsaw.sarif
+```
+
+The `continue-on-error` there is deliberate: the upload step has to run even
+when the gate fails, or the annotations never appear on the pull request that
+needs them.
+
+## `fix`, findings as code
+
+```bash
+django-chainsaw fix [--tenant-root app.Model] [--skip CHECK]
+                    [--write] [--write-generated]
+```
+
+Prints the fixes in three groups and changes nothing. `--write` applies the
+**mechanical** class only; `--write-generated` writes files such as index
+migrations for review. Full reasoning in [fixes.md](fixes.md).
+
 ## Commands
 
 ### `deploy-safety`
@@ -50,6 +90,74 @@ Without it the command only reports.
 
 Use a ratchet rather than zero on an existing project: set N to today's count
 and lower it as you go.
+
+### `n+1-serializer`
+
+```bash
+django-chainsaw n+1-serializer [--max-depth N] [--max-high N]
+```
+
+Relation crossings in DRF serializers, with the `select_related` and
+`prefetch_related` for each, grouped per serializer so it can be pasted into a
+view. Follows nested serializers, so the lookup it suggests is the full path.
+
+### `datetimes`
+
+```bash
+django-chainsaw datetimes [--search-path DIR] [--fail-on-findings]
+```
+
+### `serializers`
+
+```bash
+django-chainsaw serializers [--include-safe] [--fail-on-findings]
+```
+
+Exits `0` and says so if DRF is not importable, rather than pretending the
+project has no serializers.
+
+### `cost`
+
+```bash
+django-chainsaw cost [--page-size N] [--fan-out N] [--list-only] [--max-queries N]
+```
+
+Estimated queries per request, per endpoint. `--max-queries N` exits `1` when
+the worst endpoint is above the budget. A budget gates better than a per-finding
+threshold here: nobody agrees whether one N+1 is acceptable, everybody agrees
+that a four-figure endpoint is not.
+
+### `contract`
+
+```bash
+django-chainsaw contract [--snapshot FILE] [--update] [--max-depth N] [--fail-on-breaking]
+```
+
+What this branch changes about the API's shape. Run `--update` once on a branch
+whose shape clients already rely on and commit the snapshot; after that
+`--fail-on-breaking` exits `1` on any change that breaks an existing client, and
+on any serializer that could not be read at all.
+
+Exits `2` when no snapshot exists yet, rather than passing silently.
+
+### `on-commit`
+
+```bash
+django-chainsaw on-commit [--search-path DIR] [--include-low-confidence] [--fail-on-findings]
+```
+
+Side effects inside a transaction that cannot be rolled back. `--fail-on-findings`
+exits `1` on any high-severity one; cache writes are medium and do not fail the
+gate alone. Also available in the aggregate `check` as `on-commit`.
+
+### `indexes`
+
+```bash
+django-chainsaw indexes [--search-path DIR] [--min-occurrences N] [--max-candidates N]
+```
+
+Fields filtered or sorted on without an index. `--max-candidates N` exits `1`
+above the budget; without it the command only reports.
 
 ### `signals`
 
@@ -148,6 +256,30 @@ jobs:
 `deploy-safety` needs no database: it reads migration files and source code. If
 a database is reachable it also knows which migrations are already applied and
 skips them, which makes the result tighter but is not required.
+
+## `--since`, the lighter ratchet
+
+`deploy-safety`, `n+1`, `tenancy` and `indexes` accept `--since REF`. Only
+findings in files that changed relative to `REF` are reported.
+
+```bash
+django-chainsaw tenancy --tenant-root shop.Customer --since main --fail-on-findings
+```
+
+The comparison uses the **merge base**, not a plain two-dot diff. On a branch
+that is behind `main`, `git diff main` also reports everything `main` gained in
+the meantime, and the branch gets blamed for other people's work.
+
+Uncommitted, staged and untracked files count too: the point is to catch it
+before it is pushed.
+
+An unknown ref warns and falls back to the full report rather than failing or,
+worse, silently passing. Findings whose path cannot be matched are kept and
+listed, because a finding that vanishes because two paths did not line up is
+the worst outcome for a tool whose job is to say what is wrong.
+
+**`--since` for a pull request, a baseline for a scheduled run on the default
+branch.** They are different ratchets and both are useful.
 
 ## Baselines
 

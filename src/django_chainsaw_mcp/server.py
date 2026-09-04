@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """MCP server exposing read-only introspection and analysis of a Django project.
 
 MCPServer is the decorator API of the official MCP Python SDK. In SDK v1 the
@@ -17,12 +20,26 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 
 from .cascade import delete_impact as _delete_impact
+from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
+from .api_contract import contract as _contract
+from .api_contract import diff as _contract_diff
+from .api_contract import load_snapshot as _load_contract
+from .api_contract import write_snapshot as _write_contract
+from .check import run_all as _run_all
+from .on_commit import escaping_side_effects as _escaping_side_effects
+from .endpoint_cost import endpoint_cost as _endpoint_cost
+from .suggest import suggest_fixes as _suggest_fixes
+from .serializer_nplusone import serializer_nplusone as _serializer_nplusone
+from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
+from .explain import explain_model as _explain_model
+from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
 from .nplusone import analyse_template as _analyse_template
 from .scan import scan_templates as _scan_templates
+from .serializers import serializer_exposure as _serializer_exposure
 from .signals import what_happens_on as _what_happens_on
 from .tenancy import find_unscoped_queries as _find_unscoped_queries
 
@@ -64,6 +81,231 @@ def project_info() -> dict[str, Any]:
             alias: conf.get("ENGINE", "") for alias, conf in settings.DATABASES.items()
         },
     }
+
+
+@mcp.tool()
+def endpoint_cost(
+    page_size: int = 50,
+    nested_fan_out: int = 5,
+    list_only: bool = False,
+) -> dict[str, Any]:
+    """How many queries one request to each endpoint will cost.
+
+    Every tool that answers this runs the application and tells you afterwards:
+    the debug toolbar, silk, assertNumQueries. The number is derivable before
+    anything runs. One query for the page, plus one per object for every
+    serializer field crossing a relation the view did not prefetch, plus that
+    again per level of nesting.
+
+    On the demo project the same serializer measured 2852 queries behind an
+    unoptimised queryset and 2 behind an optimised one. The ratio is the
+    reliable part; the absolute number is only as good as nested_fan_out.
+
+    Args:
+        page_size: objects a list response returns.
+        nested_fan_out: assumed children per parent one level down. A property
+            of your data that reading the code cannot reveal.
+        list_only: skip views that only ever return a single object.
+    """
+    return _guard(
+        _endpoint_cost,
+        page_size=page_size,
+        nested_fan_out=nested_fan_out,
+        list_only=list_only,
+    )
+
+
+@mcp.tool()
+def api_contract(max_depth: int = 3) -> dict[str, Any]:
+    """The shape every serializer currently promises its clients.
+
+    Field names, types, whether each is read only, required, nullable, and what
+    the nested ones expand to. Resolved from the class definitions, so nothing
+    needs to run and no request needs to be sent.
+
+    Capture this on the branch you already shipped, commit the result, and
+    api_contract_check will tell a later branch what it broke.
+
+    Args:
+        max_depth: how far to expand nested serializers.
+    """
+    return _guard(_contract, max_depth=max_depth)
+
+
+@mcp.tool()
+def api_contract_check(
+    snapshot_path: str = _CONTRACT_FILE,
+    update: bool = False,
+    max_depth: int = 3,
+) -> dict[str, Any]:
+    """What this branch changes about the API, and who it breaks.
+
+    Removing a serializer field is a one line diff that reads as tidying up.
+    The client on a version nobody updated still reads that field. Every tool
+    that catches this needs the app running: drf-api-checker records real
+    responses during a test run, OpenAPI diffing needs the schema generated.
+
+    Changes come back sorted by who they hurt. Breaking means an existing
+    client stops working: a field it reads disappears, a field it omits becomes
+    required, a type or a constraint narrows. Risky means it still parses but
+    the values may surprise it. Additive means nobody notices.
+
+    Args:
+        snapshot_path: the committed contract to compare against.
+        update: overwrite the snapshot with the current shape instead of
+            comparing. Do this once you have decided a change is intended.
+        max_depth: how far to expand nested serializers.
+    """
+
+    def run() -> dict[str, Any]:
+        captured = _contract(max_depth=max_depth)
+        if update:
+            return _write_contract(snapshot_path, captured)
+
+        baseline = _load_contract(snapshot_path)
+        if baseline is None:
+            return {
+                "ok": False,
+                "snapshot": snapshot_path,
+                "error": (
+                    "No contract snapshot yet. Run this with update=True on a "
+                    "branch whose API shape is the one clients already use, "
+                    "then commit the file."
+                ),
+            }
+        return _contract_diff(baseline, captured)
+
+    return _guard(run)
+
+
+@mcp.tool()
+def escaping_side_effects(
+    search_path: str | None = None,
+    include_low_confidence: bool = False,
+) -> dict[str, Any]:
+    """Calls inside a transaction whose effect cannot be rolled back.
+
+    A transaction can be rolled back. An email cannot, and neither can a
+    webhook or a task a worker has already picked up.
+
+        with transaction.atomic():
+            order = Order.objects.create(...)
+            send_confirmation.delay(order.pk)
+
+    Two defects, and only one is famous. The race: the broker has the task
+    immediately, a worker can start before the commit, and it queries for a row
+    that is not there. It passes every test, because tests run in a transaction
+    that never commits with a worker that runs eagerly, and it fails under load.
+    The quieter one: if anything after that line raises, the order is gone and
+    the customer has the email.
+
+    The fix is transaction.on_commit, and calls already deferred that way are
+    not reported. The ecosystem's answer to this is runtime wrappers; ruff and
+    flake8-django do not look at it.
+
+    Args:
+        search_path: directory to scan. Defaults to the project root.
+        include_low_confidence: also report calls like `.send()` that are
+            guessed from the name, since it is also Signal.send and socket.send.
+    """
+    return _guard(
+        _escaping_side_effects,
+        search_path=search_path,
+        include_low_confidence=include_low_confidence,
+    )
+
+
+@mcp.tool()
+def suggest_fixes(tenant_root: str = "auth.User") -> dict[str, Any]:
+    """Findings turned into code, grouped by how safe each one is to apply.
+
+    Three classes, and the distinction is the point:
+
+    - **mechanical**: one correct answer derivable from the code alone, such as
+      datetime.now() becoming timezone.now(). No judgement in it.
+    - **generated**: a machine can write the artefact, a human decides whether
+      it should exist. An index migration is exactly right as text and entirely
+      wrong if that table is write-heavy.
+    - **advisory**: real code with the right names resolved, but the decision
+      belongs to somebody who knows the domain. Which user owns a row is not a
+      question the AST can answer.
+
+    Nothing is applied. The CLI `fix --write` applies the mechanical class only.
+
+    Args:
+        tenant_root: the model that owns data, for the ownership suggestions.
+    """
+    return _guard(_suggest_fixes, tenant_root=tenant_root)
+
+
+@mcp.tool()
+def check(
+    tenant_root: str = "auth.User",
+    only: list[str] | None = None,
+    skip: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run every analysis and return one severity-sorted list.
+
+    The single call to reach for on an unfamiliar project. It runs the checks
+    whose findings are defects, merges them, and sorts by severity, instead of
+    making you know which of a dozen tools to ask for.
+
+    A check that fails to run is listed in `checks_failed` rather than counted
+    as clean.
+
+    Args:
+        tenant_root: the model that owns data, for the ownership check.
+        only: run just these checks.
+        skip: run everything except these.
+    """
+    return _guard(_run_all, tenant_root=tenant_root, only=only, skip=skip)
+
+
+@mcp.tool()
+def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
+    """N+1 queries in DRF serializers, with the queryset fix for each.
+
+    find_n_plus_one answers this for templates. Most Django written today
+    renders JSON, and there the N+1 comes from a nested serializer field: a list
+    of a hundred orders runs a hundred extra queries per nested relation.
+
+    Follows nested serializers, so the lookup it suggests is the full path.
+
+    Args:
+        max_depth: how far to follow nested serializers.
+    """
+    return _guard(_serializer_nplusone, max_depth=max_depth)
+
+
+@mcp.tool()
+def explain_model(
+    model_label: str,
+    tenant_root: str = "auth.User",
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Everything known about one model, and the risks only visible combined.
+
+    Start here when meeting a model for the first time. It runs the structural,
+    ownership, deletion, signal, exposure, index and datetime checks and returns
+    one picture instead of seven reports.
+
+    The part worth reading is `correlated_risks`. Some defects exist only in the
+    overlap and no single analyser can see them: a model that is owned, read
+    without scoping, and serialised with fields = "__all__" is a complete path
+    from a URL to another customer's row, while each of those three alone is
+    just a warning.
+
+    Args:
+        model_label: "app_label.ModelName".
+        tenant_root: the model that owns data, for the ownership half.
+        include_raw: attach the full report from each analyser as well.
+    """
+    return _guard(
+        _explain_model,
+        model_label=model_label,
+        tenant_root=tenant_root,
+        include_raw=include_raw,
+    )
 
 
 @mcp.tool()
@@ -132,6 +374,60 @@ def scan_templates(
         project_root=project_root,
         root_models=root_models,
     )
+
+
+@mcp.tool()
+def serializer_exposure(include_safe: bool = False) -> dict[str, Any]:
+    """What each DRF ModelSerializer exposes, and what looks unintended.
+
+    `fields = "__all__"` is a decision made once and then re-made silently by
+    every migration after it. Add a token column to the model and the API starts
+    returning it, with no diff on the serializer for anyone to review.
+
+    Args:
+        include_safe: also list serializers with an explicit, clean field list.
+    """
+    return _guard(_serializer_exposure, include_safe=include_safe)
+
+
+@mcp.tool()
+def datetime_audit(search_path: str | None = None) -> dict[str, Any]:
+    """Naive datetimes in code, and ambiguous defaults on model fields.
+
+    With USE_TZ on, code that builds its own datetimes with datetime.now() or
+    from parts produces naive values, and mixing them with the aware ones the
+    ORM returns either raises or compares against the wrong instant. It is
+    invisible for ten months and shows up on the two nights the clock moves.
+
+    Also reports model fields whose default is naive, whose default was
+    evaluated once at import time, or that set auto_now and auto_now_add
+    together.
+
+    Args:
+        search_path: directory to scan. Defaults to the project path.
+    """
+    return _guard(_datetime_audit, search_path=search_path)
+
+
+@mcp.tool()
+def missing_indexes(search_path: str | None = None, min_occurrences: int = 1) -> dict[str, Any]:
+    """Fields the code filters or sorts on that carry no index.
+
+    Runtime tools answer this by watching real traffic, which only ever covers
+    the paths traffic reached. Reading the source covers every path in the
+    repository, works with no database and no traffic, and can run on a branch
+    before it ships.
+
+    The trade is that it cannot weigh anything: a filter on a forty row table
+    looks like one on a forty million row table. It reports where an index is
+    missing and how often the code asks for it, and leaves the decision to
+    somebody who knows the row counts.
+
+    Args:
+        search_path: directory to scan. Defaults to the project path.
+        min_occurrences: only report a field asked for at least this often.
+    """
+    return _guard(_missing_indexes, search_path=search_path, min_occurrences=min_occurrences)
 
 
 @mcp.tool()

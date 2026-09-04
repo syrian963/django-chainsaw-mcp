@@ -234,6 +234,138 @@ and dynamic dispatch.
 
 ---
 
+## `missing_indexes`
+
+Fields the code filters or sorts on that no index covers. Runtime tools answer
+this by watching traffic, which only ever covers the paths traffic reached;
+reading the source covers every path in the repository and needs no database.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project path | directory to scan |
+| `min_occurrences` | `1` | only report a field asked for at least this often |
+
+Not reported: primary keys, `unique=True`, `db_index=True`, foreign keys,
+`Meta.indexes`, `Meta.constraints`, and the leading column of a composite index.
+Lookups a btree cannot serve (`contains`, `icontains`, `iexact`, `regex`,
+`endswith`) are counted in `ignored_lookups` rather than flagged. Relation
+traversals belong to the other table and are skipped.
+
+`high` at three or more occurrences, or at any use in `order_by`.
+
+**It cannot weigh anything.** A filter on forty rows looks like one on forty
+million, and every index costs write throughput. Shortlist, not task list. See
+[`indexes.md`](indexes.md).
+
+---
+
+## `datetime_audit`
+
+Naive datetimes in code, and model field defaults that are ambiguous or frozen
+at import time. The defect is invisible for ten months and appears on the two
+nights a year the clock moves.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project path | directory to scan |
+
+Recognises `timezone.now()` as correct, including under an alias, and does not
+flag `make_aware(datetime(...))`. With `USE_TZ = False` the code findings are
+reported as informational; the model findings still stand.
+
+---
+
+## `serializer_exposure`
+
+What each DRF `ModelSerializer` exposes. `fields = "__all__"` is a decision made
+once and re-made silently by every migration after it.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `include_safe` | `false` | also list serializers with an explicit, clean field list |
+
+Name matching, not classification: a field called `token` might be a public
+share link, and a field called `notes` might hold medical history and will not
+be flagged. Serializers in modules nothing imports at startup do not exist yet
+and cannot be inspected.
+
+Both are documented in
+[`datetimes-and-serializers.md`](datetimes-and-serializers.md).
+
+---
+
+## `endpoint_cost`
+
+How many database queries one request to each DRF endpoint will cost, before
+anybody sends one. Every other tool that answers this runs the application and
+tells you afterwards.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `page_size` | `50` | objects a list response returns |
+| `nested_fan_out` | `5` | assumed children per parent, one level down |
+| `list_only` | `false` | skip views that only return a single object |
+
+On the demo project the same serializer costs 2852 queries behind an
+unoptimised queryset and 2 behind an optimised one. The ratio is the reliable
+part; the absolute number is only as good as `nested_fan_out`, which is a
+property of your data that no amount of reading the code reveals.
+
+Documented in [`endpoint-cost.md`](endpoint-cost.md).
+
+---
+
+## `api_contract`
+
+The shape every serializer currently promises: field names, types, read only,
+required, nullable, and what the nested ones expand to. Resolved from the class
+definitions, so it needs no database and no running server.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `max_depth` | `3` | how far to expand nested serializers |
+
+---
+
+## `api_contract_check`
+
+What this branch changes about that shape, and who it breaks.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `snapshot_path` | `.django-chainsaw-contract.json` | the committed contract |
+| `update` | `false` | record the current shape instead of comparing |
+| `max_depth` | `3` | how far to expand nested serializers |
+
+Changes come back classified rather than listed, which is the point. A new
+**required** field is an addition that breaks every existing writer; a plain
+field-set diff puts it in the same bucket as a harmless optional one. A
+serializer that no longer instantiates is reported as unreadable rather than
+removed, because calling it removed would be a confident wrong answer.
+
+Documented in [`api-contract.md`](api-contract.md).
+
+---
+
+## `escaping_side_effects`
+
+Calls inside a transaction whose effect cannot be rolled back: a task the
+broker already has, an email already sent, a webhook already delivered.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_low_confidence` | `false` | also report calls guessed from the name, such as `.send()` |
+
+Calls already wrapped in `transaction.on_commit`, and the same call outside any
+transaction, produce nothing. `ATOMIC_REQUESTS` is reported without being asked
+for, since it opens a transaction around every view with nothing visible at the
+call site.
+
+Documented in [`on-commit.md`](on-commit.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

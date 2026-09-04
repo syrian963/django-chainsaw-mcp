@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: django-chainsaw-mcp
+message: >-
+  If you use this software or build on its ideas, please cite it.
+type: software
+authors:
+  - family-names: Alsakka
+    given-names: Mohammad
+    email: mnouralsakka@gmail.com
+repository-code: "https://github.com/syrian963/django-chainsaw-mcp"
+abstract: >-
+  An MCP server and CLI that analyses a Django project rather than describing
+  it. It answers what a delete takes with it, where the N+1 queries are, which
+  pending migration breaks the code that is still running during a rolling
+  deploy, which queries read rows the caller does not own, and what a single
+  save actually sets off.
+keywords:
+  - django
+  - model-context-protocol
+  - mcp
+  - static-analysis
+  - code-quality
+  - orm
+license: AGPL-3.0-or-later

@@ -66,10 +66,15 @@ async def main() -> int:
             failures.append(f"project_info failed: {info.get('error')}")
 
         models = _payload(await client.call_tool("list_models", {"app_label": "shop"}))
-        count = models.get("model_count")
-        print("LIST_MODELS models=", count)
-        if count != 7:
-            failures.append(f"expected 7 models in the demo app, got {count}")
+        labels = {m["label"] for m in models.get("models", [])}
+        print("LIST_MODELS models=", models.get("model_count"))
+        # Named, not counted: a count assertion breaks whenever the demo
+        # project grows, and the reflex is to edit the number.
+        expected = {"shop.Order", "shop.OrderLine", "shop.Invoice", "shop.Customer",
+                    "shop.Product", "shop.Category", "shop.Tag"}
+        missing = expected - labels
+        if missing:
+            failures.append(f"models missing over the wire: {sorted(missing)}")
 
         unknown = [
             f"{m['label']}.{f['name']}"
@@ -118,8 +123,11 @@ async def main() -> int:
         )
         print("FIND_UNSCOPED_QUERIES candidates=", tenancy.get("unscoped_count"),
               "high=", tenancy.get("high_severity_count"))
-        if tenancy.get("unscoped_count") != 4:
-            failures.append(f"expected 4 unscoped querysets, got {tenancy.get('unscoped_count')}")
+        api_lines = sorted(
+            f["line"] for f in tenancy.get("findings", []) if f["file"].endswith("api.py")
+        )
+        if api_lines != [14, 19, 24, 29]:
+            failures.append(f"api.py should contribute four findings, got lines {api_lines}")
         if "shop.Product" in (tenancy.get("tenant_scoped_models") or {}):
             failures.append("Product must not be treated as tenant-scoped")
 
@@ -132,6 +140,15 @@ async def main() -> int:
             failures.append(f"expected a three-receiver chain, got {chain.get('receiver_count')}")
         if "delay" not in {e["call"] for e in chain.get("side_effects", [])}:
             failures.append("the Celery task three hops away did not surface over the wire")
+
+        idx = _payload(await client.call_tool("missing_indexes", {}))
+        print("MISSING_INDEXES candidates=", idx.get("candidate_count"),
+              "high=", idx.get("high_severity_count"))
+        flagged = {(f["model"], f["field"]) for f in idx.get("findings", [])}
+        if ("shop.Product", "name") not in flagged:
+            failures.append("Product.name should be reported as missing an index")
+        if ("shop.Product", "sku") in flagged:
+            failures.append("sku is unique and indexed, it must not be reported")
 
         resources = await client.list_resources()
         uris = [str(r.uri) for r in resources.resources]

@@ -31,9 +31,25 @@ expect 0 "migrations without gate"                $BIN migrations
 expect 2 "delete-impact with unknown model"       $BIN delete-impact nope.Nope
 expect 0 "delete-impact shop.Customer"            $BIN delete-impact shop.Customer
 expect 0 "models --short"                         $BIN models --short
+expect 1 "check (findings expected)"              $BIN check --tenant-root shop.Customer
+# The demo project ships a blocking migration, which is critical, so raising
+# the threshold does not make it pass. Narrowing the checks does.
+expect 1 "check --fail-on critical (one exists)"  $BIN check --tenant-root shop.Customer --fail-on critical
+expect 0 "check --skip deploy-safety --fail-on critical" $BIN check --tenant-root shop.Customer --skip deploy-safety --fail-on critical
+expect 0 "check --only datetimes"                 $BIN check --only datetimes --fail-on critical
+expect 0 "n+1-serializer without gate"            $BIN n+1-serializer
+expect 0 "cost without gate"                      $BIN cost
+expect 1 "cost --max-queries 10"                  $BIN cost --max-queries 10
+expect 0 "explain shop.Customer"                  $BIN explain shop.Customer --tenant-root shop.Customer
+expect 0 "explain shop.Order"                     $BIN explain shop.Order --tenant-root shop.Customer
+expect 2 "explain with unknown model"             $BIN explain nope.Nope
 expect 1 "tenancy --fail-on-findings"             $BIN tenancy --tenant-root shop.Customer --fail-on-findings
 expect 0 "tenancy without gate"                   $BIN tenancy --tenant-root shop.Customer
 expect 0 "signals shop.OrderLine"                 $BIN signals shop.OrderLine
+expect 0 "indexes without gate"                   $BIN indexes
+expect 0 "datetimes without gate"                 $BIN datetimes
+expect 1 "datetimes --fail-on-findings"           $BIN datetimes --fail-on-findings
+expect 1 "indexes --max-candidates 0"             $BIN indexes --max-candidates 0
 expect 2 "signals with unknown model"             $BIN signals nope.Nope
 
 echo
