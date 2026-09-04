@@ -19,6 +19,7 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from .asyncio_blocking import blocking_in_async as _blocking_in_async
 from .cascade import delete_impact as _delete_impact
 from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
 from .api_contract import contract as _contract
@@ -41,6 +42,8 @@ from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
+from .project import get_profile as _get_profile
+from .project import resolve_root as _resolve_root
 from .money import money_precision as _money_precision
 from .nplusone import analyse_template as _analyse_template
 from .scan import scan_templates as _scan_templates
@@ -350,6 +353,62 @@ def money_precision(search_path: str | None = None) -> dict[str, Any]:
         search_path: directory to scan. Defaults to the project root.
     """
     return _guard(_money_precision, search_path=search_path)
+
+
+@mcp.tool()
+def project_profile(search_path: str | None = None) -> dict[str, Any]:
+    """What this project is built on, without needing Django to boot.
+
+    Frameworks are counted by how many of the project's own files import
+    them, not by what is installed: a package sitting in the virtualenv that
+    nothing imports is a fact about the environment, not the code. A project
+    can be Django and FastAPI at once and both are reported.
+
+    Use it to find out which checks can say anything here.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+
+    def run() -> dict[str, Any]:
+        return _get_profile(_resolve_root(search_path)).as_dict()
+
+    return _guard(run)
+
+
+@mcp.tool()
+def blocking_in_async(
+    search_path: str | None = None,
+    follow_calls: bool = True,
+    max_depth: int = 3,
+) -> dict[str, Any]:
+    """Synchronous calls that run on the event loop.
+
+    FastAPI runs an `async def` endpoint on the loop itself and a `def`
+    endpoint in a threadpool. So a blocking call inside `async def` does not
+    slow one request, it stops every request in the process - invisible at one
+    request a second, an outage at two hundred.
+
+    ruff's ASYNC rules cover open, time.sleep and subprocess inside an async
+    function. This adds the two that matter more: a synchronous database call,
+    which is the common one, and a blocking call reached through another
+    project function, where nothing at the call site looks blocking. The second
+    comes back with the path that reaches it.
+
+    Needs no Django. A `def` endpoint is never reported, because blocking in a
+    threadpool is fine and telling somebody to make it async causes the outage.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        follow_calls: also report blocking reached through a project function.
+        max_depth: how many calls deep to follow.
+    """
+    return _guard(
+        _blocking_in_async,
+        search_path=search_path,
+        follow_calls=follow_calls,
+        max_depth=max_depth,
+    )
 
 
 @mcp.tool()

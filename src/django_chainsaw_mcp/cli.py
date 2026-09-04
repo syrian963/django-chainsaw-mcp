@@ -25,6 +25,7 @@ from typing import Any
 from . import baseline as _baseline
 from . import gitdiff as _gitdiff
 from . import sarif as _sarif
+from .asyncio_blocking import blocking_in_async
 from .cascade import delete_impact
 from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
 from .serializer_nplusone import serializer_nplusone
@@ -56,11 +57,24 @@ EXIT_FINDINGS = 1
 EXIT_ERROR = 2
 
 
+# Commands that read source and nothing else. Booting Django for these turned
+# a question about Python into a question about settings, and refused to
+# analyse a FastAPI project for reasons that had nothing to do with the ask.
+_FRAMEWORK_FREE = {"async", "profile"}
+
+
 def _bootstrap(args: argparse.Namespace) -> None:
     if args.project_path:
         os.environ[PROJECT_PATH_VAR] = args.project_path
     if args.settings:
         os.environ[SETTINGS_MODULE_VAR] = args.settings
+
+    if getattr(args, "command", None) in _FRAMEWORK_FREE:
+        from .project import project_root
+
+        args._project_config = _config.load(project_root())
+        return
+
     config = ensure_django(BootConfig.from_env())
 
     # pyproject.toml supplies what the flags did not. A flag always wins,
@@ -523,6 +537,60 @@ def _cmd_money(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["high_severity_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_profile(args: argparse.Namespace) -> int:
+    from .project import get_profile, resolve_root
+
+    report = get_profile(resolve_root(args.search_path)).as_dict()
+    _emit(report, args.json)
+    if not args.json:
+        print(f"{report['files_scanned']} Python file(s) under {report['root']}")
+        print(f"{report['async_functions']} async function(s), "
+              f"{report['sync_functions']} sync")
+        print()
+        if not report["frameworks"]:
+            print("No known framework imported by this project's own files.")
+        for name, count in report["frameworks"].items():
+            print(f"  {name:<14} imported by {count} file(s)")
+        print()
+        print(report["note"])
+    return EXIT_OK
+
+
+def _cmd_async(args: argparse.Namespace) -> int:
+    report = blocking_in_async(
+        search_path=args.search_path,
+        follow_calls=not args.no_follow,
+        max_depth=args.max_depth,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        frameworks = ", ".join(report["frameworks"]) or "none detected"
+        print(f"{report['async_functions_seen']} async function(s) in "
+              f"{report['files_scanned']} file(s)  [{frameworks}]")
+        print()
+        if not report["finding_count"]:
+            print("Nothing blocking runs on the event loop.")
+        for f in report["direct"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  in async {f['function']}()  [{f['kind']}]")
+            print(f"         {f['code']}")
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        for f in report["reached_through_a_call"]:
+            print(f"  HIGH   {f['file']}:{f['line']}  [{f['kind']}]  {f['call']}")
+            print(f"         reached from async {f['function']}()")
+            print("         path:  " + " -> ".join(f["reached_through"]))
+            print(f"         {f['why']}")
+            print(f"         fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1310,6 +1378,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 on any high-severity precision loss")
     p.set_defaults(func=_cmd_money)
 
+    p = sub.add_parser("profile", help="what this project is built on")
+    p.add_argument("--search-path", metavar="DIR")
+    p.set_defaults(func=_cmd_profile)
+
+    p = sub.add_parser("async", help="blocking calls that run on the event loop")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--no-follow", action="store_true",
+                   help="only report blocking written directly in an async function")
+    p.add_argument("--max-depth", type=int, default=3,
+                   help="how many calls deep to follow")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 if anything blocking runs on the loop")
+    p.set_defaults(func=_cmd_async)
+
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
     p.add_argument("--skip", action="append", metavar="CHECK",
@@ -1422,9 +1504,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    from .project import NoProjectError
+
     try:
         _bootstrap(args)
-    except DjangoBootError as exc:
+    except (DjangoBootError, NoProjectError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 

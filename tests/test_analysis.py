@@ -1075,3 +1075,76 @@ def test_raw_sql_is_inventoried_so_clear_can_be_qualified():
     assert ("rawsql.py", ".raw()") in kinds
     assert report["raw_sql_count"] == len(report["raw_sql_sites"])
     assert "build SQL by hand" in report["note"]
+
+
+def _fastapi_root():
+    from pathlib import Path
+
+    return str(Path(__file__).resolve().parent.parent / "testprojects" / "fastapi_demo")
+
+
+def _async_report():
+    from django_chainsaw_mcp.asyncio_blocking import blocking_in_async
+
+    return blocking_in_async(search_path=_fastapi_root())
+
+
+def test_a_non_django_project_is_profiled_without_booting_django():
+    # Every check used to start with ensure_django(), so a FastAPI project got
+    # a boot error instead of an answer to a question that never needed Django.
+    from pathlib import Path
+
+    from django_chainsaw_mcp.project import get_profile
+
+    found = get_profile(Path(_fastapi_root()))
+    assert found.uses("fastapi")
+    assert found.uses("sqlalchemy")
+    assert not found.is_django
+    assert found.async_functions >= 5
+
+
+def test_a_blocking_database_call_on_the_event_loop_is_reported():
+    # session.query(User).get(pk) has a call in the middle of the chain, which
+    # is why a plain dotted-name walk missed the commonest form of this bug.
+    direct = {(f["function"], f["kind"]) for f in _async_report()["direct"]}
+    assert ("get_user", "database") in direct
+
+
+def test_blocking_reached_through_a_call_is_reported_with_the_path():
+    # Neither file is suspicious alone: the endpoint calls a helper, and the
+    # helper is where the loop stops.
+    reached = {f["function"]: f for f in _async_report()["reached_through_a_call"]}
+    assert "get_report" in reached
+    assert reached["get_report"]["reached_through"][-1].endswith("build_report")
+    assert "notify" in reached
+
+
+def test_a_sync_def_endpoint_is_never_reported():
+    # FastAPI runs it in a threadpool. Telling somebody to make it async is
+    # the advice that causes the outage.
+    report = _async_report()
+    names = {f["function"] for f in report["direct"]}
+    names |= {f["function"] for f in report["reached_through_a_call"]}
+    assert "get_user_sync" not in names
+
+
+def test_awaited_and_non_database_calls_stay_silent():
+    report = _async_report()
+    names = {f["function"] for f in report["direct"]}
+    names |= {f["function"] for f in report["reached_through_a_call"]}
+    # httpx awaited inside an async client
+    assert "proxy" not in names
+    # values.count(1) on a list is not a database call
+    assert "counts" not in names
+
+
+def test_offloading_to_a_thread_is_not_a_finding():
+    # asyncio.to_thread and loop.run_in_executor are the correct way to run
+    # blocking work from an async endpoint. Both are awaited, and awaiting is
+    # what makes a call safe, so they need no special case - but they need a
+    # test, because the documentation once claimed they were false positives.
+    report = _async_report()
+    names = {f["function"] for f in report["direct"]}
+    names |= {f["function"] for f in report["reached_through_a_call"]}
+    assert "offloaded" not in names
+    assert "via_executor" not in names

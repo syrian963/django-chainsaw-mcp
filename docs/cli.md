@@ -205,6 +205,16 @@ exactly representable — are hidden unless `--include-low`. `--fail-on-findings
 exits `1` on any high. Also in the aggregate `check` as `money`, where low
 findings are excluded.
 
+### `async`
+
+```bash
+django-chainsaw async [--search-path DIR] [--no-follow] [--max-depth N] [--fail-on-findings]
+```
+
+Blocking calls that run on the event loop, directly or reached through a
+project function. Needs no Django, so it works on a FastAPI or Starlette
+project with only `DJANGO_CHAINSAW_PROJECT_PATH` set.
+
 ### `indexes`
 
 ```bash

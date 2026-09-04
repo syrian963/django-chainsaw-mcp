@@ -7,6 +7,33 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`blocking_in_async`, and the framework detection that made it possible.**
+  FastAPI runs an `async def` endpoint on the event loop itself and a `def`
+  endpoint in a threadpool, so a synchronous call inside `async def` does not
+  slow one request - it stops every request in the process. Invisible at one
+  request a second, an outage at two hundred, and the traceback points at
+  whichever endpoint timed out rather than at the line.
+
+  `ruff`'s ASYNC rules cover `open`, `time.sleep` and `subprocess` inside an
+  async function. This adds the two that matter more: a synchronous database
+  call, which is the common one, and a blocking call reached **through another
+  project function**, where nothing at the call site looks blocking. The second
+  comes back with the path that reaches it.
+
+  A `def` endpoint is never reported - blocking in a threadpool is fine, and
+  telling somebody to make a working sync endpoint async is the advice that
+  causes the outage. Anything awaited is silent, which covers
+  `asyncio.to_thread` and `run_in_executor` without a special case.
+
+- **`project_profile` and a boot that no longer assumes Django.** Every check
+  began with `ensure_django()`, so a FastAPI project got a settings error
+  instead of an answer to a question that never needed Django. Frameworks are
+  now detected from the project's own imports - a package sitting in the
+  virtualenv that nothing imports is a fact about the environment, not the
+  code - and checks that only read source skip the Django boot entirely.
+  `django-chainsaw async` and `django-chainsaw profile` need only
+  `DJANGO_CHAINSAW_PROJECT_PATH`.
+
 - **`migration_risk` reports which migrations cannot be rolled back.**
   `RunPython` and `RunSQL` are the only operations Django cannot reverse on
   their own: without `reverse_code` / `reverse_sql` they raise
