@@ -1717,3 +1717,35 @@ def test_an_edited_file_invalidates_the_cached_graph(tmp_path):
     after = callgraph.build(tmp_path)
     assert after is not before
     assert any(q.endswith(".b") for q in after.functions)
+
+
+def test_a_nested_serializer_is_attributed_through_its_parent():
+    # The nested class is named in a class body, not in any function, so
+    # neither the backward walk nor the method-body route can see it.
+    report = _impact()
+    assert report["classes_nested_in_another_class"] > 0
+    entry = _entry(report, "ManualReportView.get")
+    assert entry is not None
+    nested = [
+        f for f in entry["findings"]
+        if "CustomerBriefSerializer" in (f["title"] or "")
+    ]
+    assert nested, "the nested serializer's finding did not reach the view"
+    # and the path names the nesting rather than stopping at the parent
+    assert any(
+        hop.endswith("CustomerBriefSerializer") for hop in nested[0]["through"]
+    )
+
+
+def test_one_field_reached_by_two_roots_gives_two_distinguishable_findings():
+    # The same nested field is reported once per root serializer, because the
+    # prefetch belongs on each root's queryset and those are different fixes.
+    # Dropping the root made them look like one line printed twice.
+    from django_chainsaw_mcp.check import run_all
+
+    titles = [
+        f["title"] for f in run_all(only=["n+1-serializer"])["findings"]
+        if "CustomerBriefSerializer.orders" in f["title"]
+    ]
+    assert len(titles) > 1
+    assert len(set(titles)) == len(titles), titles

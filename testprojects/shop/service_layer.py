@@ -40,6 +40,19 @@ def daily_report(request):
     return Response({"customers": [c.pk for c in decorate(Order.objects.all())]})
 
 
+class CustomerBriefSerializer(serializers.ModelSerializer):
+    """Nested inside the one below, and named by no function anywhere.
+
+    A nested serializer is a field in a class body. Neither the backward walk
+    nor the "built in a method body" route can see that reference; the chain
+    that matters is nested -> parent -> the view serving the parent.
+    """
+
+    class Meta:
+        model = Customer
+        fields = ["id", "orders"]
+
+
 class ManualOrderSerializer(serializers.ModelSerializer):
     """Served by a view that never declares it, which is the common shape.
 
@@ -47,6 +60,8 @@ class ManualOrderSerializer(serializers.ModelSerializer):
     APIView takes. This one is built in the method body, so there is no
     attribute for anything to read - only the name in the code.
     """
+
+    customer = CustomerBriefSerializer()
 
     class Meta:
         model = Order

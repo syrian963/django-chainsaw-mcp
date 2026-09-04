@@ -206,14 +206,25 @@ class TreeCache:
 
     def __init__(self, root: Path) -> None:
         self.root = root
+        self._trees: dict[str, Any | None] = {}
         self._index: dict[str, dict[tuple[str, int], Any] | None] = {}
+
+    def module(self, relative: str) -> Any | None:
+        """The parsed module, or None if it could not be read or parsed."""
+        if relative not in self._trees:
+            try:
+                source = (self.root / relative).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                self._trees[relative] = ast.parse(source)
+            except (OSError, SyntaxError):
+                self._trees[relative] = None
+        return self._trees[relative]
 
     def definitions(self, relative: str) -> dict[tuple[str, int], Any] | None:
         if relative not in self._index:
-            try:
-                source = (self.root / relative).read_text(encoding="utf-8", errors="replace")
-                tree = ast.parse(source)
-            except (OSError, SyntaxError):
+            tree = self.module(relative)
+            if tree is None:
                 self._index[relative] = None
                 return None
             self._index[relative] = {

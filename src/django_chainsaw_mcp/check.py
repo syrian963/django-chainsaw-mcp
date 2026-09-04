@@ -100,15 +100,25 @@ def _from_templates(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _from_serializer_nplusone(report: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        _finding(
-            "n+1-serializer", f["severity"],
-            f"{f['serializer']}.{f['field']} crosses a relation",
-            f.get("location"), f["why"], f.get("suggested"),
+    out = []
+    for f in report.get("findings", []):
+        if not f.get("relation"):
+            continue
+        title = f"{f['serializer']}.{f['field']} crosses a relation"
+        root = f.get("root_serializer")
+        # The same nested field is reported once per root serializer that
+        # reaches it, because the prefetch belongs on each root's queryset and
+        # they are different fixes. Dropping the root made three separate
+        # findings look like the same line printed three times.
+        if root and root != f["serializer"]:
+            title += f", served through {root}"
+        out.append(
+            _finding(
+                "n+1-serializer", f["severity"], title,
+                f.get("location"), f["why"], f.get("suggested"),
+            )
         )
-        for f in report.get("findings", [])
-        if f.get("relation")
-    ]
+    return out
 
 
 def _from_exposure(report: dict[str, Any]) -> list[dict[str, Any]]:

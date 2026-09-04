@@ -7,6 +7,13 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A nested serializer is attributed through its parent.** It is a field in a
+  class body - inside no function at all - so neither the backward walk nor the
+  method-body route could see it. The chain nested -> parent -> the view
+  serving the parent is followed to any depth, and the reported path carries
+  the nesting instead of stopping at the parent. On a large real project this
+  took serializer findings from 79 unattributed to 47.
+
 - **`request_impact` reads the URLconf.** A plain Django function view carries
   no decorator and belongs to no view class, so nothing in its source says it
   serves HTTP and every defect on its path was reported as reached by nothing.
@@ -85,6 +92,12 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   project every check still runs and nothing is skipped.
 
 ### Fixed
+
+- **The same nested field appeared as several identical findings.** It is
+  reported once per root serializer that reaches it - deliberately, because the
+  prefetch belongs on each root's queryset and those are different fixes - but
+  the aggregate dropped `root_serializer`, so three separate findings read as
+  one line printed three times.
 
 - **An empty serializer-to-view map could not be told from one that failed to
   build.** One means "nothing to attribute" and the other means "could not

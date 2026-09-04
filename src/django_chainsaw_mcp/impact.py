@@ -289,7 +289,7 @@ def _reaching(
 
 
 def _serializer_uses(
-    graph: CallGraph, root: Path, wanted: set[str]
+    graph: CallGraph, trees: TreeCache, wanted: set[str]
 ) -> dict[str, list[str]]:
     """Serializer class -> the functions whose body names it.
 
@@ -312,7 +312,6 @@ def _serializer_uses(
     for qualname in wanted:
         short.setdefault(qualname.rsplit(".", 1)[-1], set()).add(qualname)
 
-    trees = TreeCache(root)
     uses: dict[str, list[str]] = {}
     for qualname, fn in graph.functions.items():
         node = trees.function(fn)
@@ -333,6 +332,61 @@ def _serializer_uses(
             if resolved in candidates:
                 uses.setdefault(resolved, []).append(qualname)
     return {key: sorted(set(value)) for key, value in uses.items()}
+
+
+def _class_uses(
+    graph: CallGraph, trees: TreeCache, wanted: set[str]
+) -> dict[str, list[str]]:
+    """Serializer class -> the classes whose body names it.
+
+    A nested serializer is a field on its parent:
+
+        class OrderSerializer(ModelSerializer):
+            customer = CustomerSerializer()
+
+    That reference is in a class body, not inside any function, so neither the
+    backward walk nor the "built in a method body" route can see it. The chain
+    that matters is nested -> parent -> the view serving the parent, and it can
+    be several links long.
+    """
+    if not wanted:
+        return {}
+
+    short: dict[str, set[str]] = {}
+    for qualname in wanted:
+        short.setdefault(qualname.rsplit(".", 1)[-1], set()).add(qualname)
+
+    bodies: dict[str, list[str]] = {}
+    for relative in sorted({fn.file for fn in graph.functions.values()}
+                           | {cls.file for cls in graph.classes.values()}):
+        tree = trees.module(relative)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            holder = graph.class_at(relative, node.lineno)
+            if holder is None:
+                continue
+            imports = graph.imports.get(graph.class_module.get(holder, ""), {})
+            for child in ast.walk(node):
+                # A name inside a method belongs to the method, which the
+                # function route already covers.
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if isinstance(child, ast.Name):
+                    name = child.id
+                elif isinstance(child, ast.Attribute):
+                    name = child.attr
+                else:
+                    continue
+                candidates = short.get(name)
+                if not candidates:
+                    continue
+                resolved = imports.get(name) or f"{graph.class_module.get(holder, '')}.{name}"
+                if resolved in candidates and resolved != holder:
+                    bodies.setdefault(resolved, []).append(holder)
+    return {key: sorted(set(value)) for key, value in bodies.items()}
 
 
 def _serializer_map(root: Path) -> tuple[dict[str, list[str]], str | None]:
@@ -405,7 +459,10 @@ def impact(
         )
         if where is not None
     }
-    uses = _serializer_uses(graph, root, {o for o in owners if o})
+    named = {o for o in owners if o}
+    trees = TreeCache(root)
+    uses = _serializer_uses(graph, trees, named)
+    class_uses = _class_uses(graph, trees, named)
 
     by_entry: dict[str, dict[str, Any]] = {}
     declarative: dict[str, dict[str, Any]] = {}
@@ -425,11 +482,26 @@ def impact(
         if holder is None:
             hits = {}
             owner = graph.class_at(relative, line)
-            # A function that builds the serializer itself is a caller like any
-            # other, so the ordinary backward walk applies from there.
-            for user in uses.get(owner or "", ()):
-                for entry, path in _reaching(reverse, user, entries, max_depth).items():
-                    hits.setdefault(entry, [*path, owner])
+            # A nested serializer is served through its parent, which may
+            # itself be nested. Follow that chain before giving up.
+            # Each step carries the nesting it came through, so the path
+            # reads parent -> nested rather than stopping at the parent and
+            # leaving the reader to find the field themselves.
+            chain = [(owner, [owner])] if owner else []
+            walked = {owner} if owner else set()
+            while chain:
+                current, nesting = chain.pop(0)
+                # A function that builds the class is a caller like any other,
+                # so the ordinary backward walk applies from there.
+                for user in uses.get(current, ()):
+                    for entry, path in _reaching(
+                        reverse, user, entries, max_depth
+                    ).items():
+                        hits.setdefault(entry, [*path, *reversed(nesting)])
+                for parent in class_uses.get(current, ()):
+                    if parent not in walked:
+                        walked.add(parent)
+                        chain.append((parent, [*nesting, parent]))
             for view in serving.get(owner or "", ()):
                 for entry in _entries_on(entries, view):
                     hits[entry] = [entry, owner]
@@ -507,6 +579,7 @@ def impact(
         "serializers_declared_by_a_view": len(serving),
         "serializer_map_error": serving_error,
         "classes_built_inside_a_function": len(uses),
+        "classes_nested_in_another_class": len(class_uses),
         "entry_points_by_kind": dict(sorted(kinds.items())),
         "entry_points_with_findings": len(ranked),
         "entry_points": ranked,

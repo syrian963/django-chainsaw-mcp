@@ -110,6 +110,23 @@ which the call graph already records, so `Foo` meaning two different classes in
 two modules stays two different classes; a bare-name match would have been far
 easier and would have attributed findings to the wrong endpoint.
 
+A nested serializer is a third case again. It is a field in a class body:
+
+```python
+class ManualOrderSerializer(ModelSerializer):
+    customer = CustomerBriefSerializer()
+```
+
+That reference is inside no function at all, so the chain that matters is
+nested → parent → the view serving the parent, and it can be several links
+long. The path carries the nesting rather than stopping at the parent:
+
+```
+            high      n+1-serializer   shop/service_layer.py:43
+                      CustomerBriefSerializer.orders crosses a relation
+                      via get -> ManualOrderSerializer -> CustomerBriefSerializer
+```
+
 A ViewSet that declares `serializer_class` and overrides nothing is still an
 endpoint. There is no method to point at, so the class is named instead, which
 is the honest answer rather than a missing one.
