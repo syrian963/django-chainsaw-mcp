@@ -1,20 +1,36 @@
-"""MCP server exposing read-only introspection of a Django project.
+"""MCP server exposing read-only introspection and analysis of a Django project.
 
 MCPServer is the decorator API of the official MCP Python SDK. In SDK v1 the
 same class was called FastMCP; it was renamed in v2. Neither has anything to do
 with FastAPI, despite the old name.
+
+Tools are for actions and for anything parameterised. Resources are for stable,
+addressable data: the model graph does not change between calls, so it is
+exposed as a resource rather than as another tool.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from .cascade import delete_impact as _delete_impact
 from .django_env import DjangoBootError, ensure_django
 from .introspect import list_models as _list_models
+from .migrations import migration_risk as _migration_risk
+from .nplusone import analyse_template as _analyse_template
 
 mcp = MCPServer("django-chainsaw")
+
+
+def _guard(fn, *args, **kwargs) -> dict[str, Any]:
+    """Turn expected failures into readable output instead of a dead server."""
+    try:
+        return fn(*args, **kwargs)
+    except (DjangoBootError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @mcp.tool()
@@ -51,13 +67,61 @@ def list_models(app_label: str | None = None, include_fields: bool = True) -> di
     """List the project's models with their fields and relations.
 
     Args:
-        app_label: Restrict to one app, e.g. "catalogue". Omit for all apps.
+        app_label: Restrict to one app, e.g. "shop". Omit for all apps.
         include_fields: Set False for a short overview without field details.
     """
-    try:
-        return _list_models(app_label=app_label, include_fields=include_fields)
-    except (DjangoBootError, ValueError) as exc:
-        return {"ok": False, "error": str(exc)}
+    return _guard(_list_models, app_label=app_label, include_fields=include_fields)
+
+
+@mcp.tool()
+def delete_impact(model_label: str, max_depth: int = 6) -> dict[str, Any]:
+    """Show what deleting one row of a model would take with it.
+
+    Follows on_delete across the whole model graph: which models lose rows
+    through CASCADE, which PROTECT relations would block the delete, and which
+    fields get set to NULL. Reads the graph only, never the database.
+
+    Args:
+        model_label: "app_label.ModelName", e.g. "shop.Customer".
+        max_depth: how far to follow chained cascades.
+    """
+    return _guard(_delete_impact, model_label=model_label, max_depth=max_depth)
+
+
+@mcp.tool()
+def find_n_plus_one(template_path: str, root_models: dict[str, str]) -> dict[str, Any]:
+    """Find relation traversals in a template that each cost a query.
+
+    Resolves attribute chains against the real model graph and flags the ones
+    that cross a relation inside a loop, which is where N+1 queries come from.
+    Reports candidates: whether a crossing really costs a query depends on the
+    queryset in the view, which this does not read.
+
+    Args:
+        template_path: path to the template file.
+        root_models: context variable to model label, e.g.
+            {"orders": "shop.Order"}. Loop variables inherit from these.
+    """
+    return _guard(_analyse_template, template_path=template_path, root_models=root_models)
+
+
+@mcp.tool()
+def migration_risk(include_applied: bool = False) -> dict[str, Any]:
+    """Rate migrations by what they do to a live database.
+
+    Flags operations that block writes, rewrite a table, or break the code that
+    is still running during a rolling deploy.
+
+    Args:
+        include_applied: also classify migrations that already ran.
+    """
+    return _guard(_migration_risk, include_applied=include_applied)
+
+
+@mcp.resource("django://models", mime_type="application/json")
+def model_graph() -> str:
+    """The full model graph. Stable between calls, so a resource, not a tool."""
+    return json.dumps(_guard(_list_models, app_label=None, include_fields=True), indent=2)
 
 
 def main() -> None:

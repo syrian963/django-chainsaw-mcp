@@ -1,0 +1,29 @@
+{# Deliberately written the way a slow page is written. #}
+<h1>Orders</h1>
+
+<table>
+  {% for order in orders %}
+    <tr>
+      {# crosses ManyToOne inside the loop: one query per order #}
+      <td>{{ order.customer.email }}</td>
+
+      {# two hops, still one query per order once select_related is missing #}
+      <td>{{ order.invoice.number }}</td>
+
+      <td>
+        {# reverse FK inside the loop: needs prefetch_related, not select_related #}
+        {% for line in order.lines.all %}
+          {{ line.product.name }} x {{ line.quantity }}
+          {# three hops from the line: product -> category #}
+          <small>{{ line.product.category.name }}</small>
+        {% endfor %}
+      </td>
+
+      {# plain field on the loop variable: no relation crossed, must not be flagged #}
+      <td>{{ order.placed_at }}</td>
+    </tr>
+  {% endfor %}
+</table>
+
+{# outside any loop: one extra query, low severity #}
+<p>First customer: {{ single_order.customer.email }}</p>
