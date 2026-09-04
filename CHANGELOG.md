@@ -7,6 +7,26 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`sqlalchemy_nplusone`**: relationships SQLAlchemy loads one row at a time.
+  Two shapes. The familiar one is a lazy relationship touched inside a loop,
+  where the query and the access are usually far enough apart that neither line
+  looks wrong. The quieter one has no loop at all: a FastAPI endpoint returning
+  `db.query(Order).all()` under `response_model=list[OrderOut]` walks
+  `Order.items` once per row during **serialisation**, after the function has
+  returned, which is why nothing in the body mentions it.
+
+  `nplusone` finds this at runtime by watching lazy loads happen, `lazy="raise"`
+  turns it into an exception, and the documentation's own advice is query-count
+  tests - all of which need the code path to run. Both halves are in the
+  source: the query says what it eagerly loaded, the model says which
+  attributes are relationships.
+
+  A relationship declared `lazy="selectin"`, `"joined"`, `"subquery"` or
+  `"immediate"` is never reported because it is already eager, and `lazy="raise"`
+  is never reported because it is the recommended fix. Nothing is imported, so
+  it runs on a checkout with no dependencies installed and no Django
+  configured.
+
 - **`fastapi_exposure`**: endpoints that serialise more than they declare.
   With no `response_model` and no return annotation, FastAPI serialises
   whatever the function returns - the whole ORM object, every column,

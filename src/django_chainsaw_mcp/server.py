@@ -33,6 +33,7 @@ from .on_commit import escaping_side_effects as _escaping_side_effects
 from .endpoint_cost import endpoint_cost as _endpoint_cost
 from .suggest import suggest_fixes as _suggest_fixes
 from .serializer_nplusone import serializer_nplusone as _serializer_nplusone
+from .sqlalchemy_nplusone import sqlalchemy_nplusone as _sqlalchemy_nplusone
 from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
@@ -440,6 +441,38 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
         search_path: directory to scan. Defaults to the configured project.
     """
     return _guard(_fastapi_exposure, search_path=search_path)
+
+
+@mcp.tool()
+def sqlalchemy_nplusone(search_path: str | None = None) -> dict[str, Any]:
+    """Relationships SQLAlchemy will load one row at a time.
+
+        orders = db.query(Order).all()
+        for order in orders:
+            print(order.customer.name)      # one query per order
+
+    And the quieter FastAPI shape, where there is no loop to see:
+
+        @app.get("/orders", response_model=list[OrderOut])
+        def list_orders(db=Depends(get_db)):
+            return db.query(Order).all()
+
+    OrderOut declares `items`, so serialisation walks the relationship once
+    per row - after the endpoint has returned, which is why nothing in the
+    function body mentions it.
+
+    nplusone finds this at runtime by watching lazy loads happen, and
+    lazy="raise" turns it into an exception; both need the code path to run.
+    A relationship declared lazy="selectin", "joined" or "raise" is never
+    reported here, since the first two are already eager and the third is the
+    recommended fix.
+
+    Nothing is imported. Needs no Django.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+    return _guard(_sqlalchemy_nplusone, search_path=search_path)
 
 
 @mcp.tool()

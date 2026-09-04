@@ -1198,3 +1198,48 @@ def test_a_bounded_or_author_written_response_is_silent():
     assert "annotated_user" not in found
     # a dict the author wrote is not a leak
     assert "status" not in found
+
+
+def _sqla():
+    from django_chainsaw_mcp.sqlalchemy_nplusone import sqlalchemy_nplusone
+
+    report = sqlalchemy_nplusone(search_path=_fastapi_root())
+    loops = {(f["function"], f["attribute"]) for f in report["in_loops"]}
+    responses = {(f["function"], f["attribute"]) for f in report["in_response_models"]}
+    return loops, responses, report
+
+
+def test_a_lazy_relationship_touched_in_a_loop_is_an_n_plus_one():
+    loops, _, _ = _sqla()
+    assert ("report", "customer") in loops
+
+
+def test_a_query_that_eagerly_loads_what_the_loop_touches_is_silent():
+    loops, _, _ = _sqla()
+    assert not [k for k in loops if k[0] == "report_eager"]
+
+
+def test_a_relationship_that_is_always_eager_is_never_reported():
+    # lazy="selectin" loads it up front every time, so it cannot be an N+1.
+    loops, _, _ = _sqla()
+    assert not [k for k in loops if k[0] == "report_always_eager"]
+
+
+def test_lazy_raise_is_the_recommended_fix_and_is_not_a_finding():
+    # It turns the mistake into an exception at runtime. Reporting it would be
+    # telling somebody to fix the thing they already fixed.
+    loops, _, _ = _sqla()
+    assert not [k for k in loops if k[0] == "report_raising"]
+
+
+def test_a_response_model_walks_the_relationship_with_no_loop_to_see():
+    # Serialisation happens after the endpoint returns, so nothing in the
+    # function body mentions `items` at all.
+    _, responses, _ = _sqla()
+    assert ("list_orders", "items") in responses
+
+
+def test_a_response_model_declaring_no_relationship_is_silent():
+    _, responses, _ = _sqla()
+    assert not [k for k in responses if k[0] == "list_order_ids"]
+    assert not [k for k in responses if k[0] == "list_orders_eager"]

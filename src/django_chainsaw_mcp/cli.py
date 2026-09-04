@@ -30,6 +30,7 @@ from .cascade import delete_impact
 from .fastapi_exposure import fastapi_exposure
 from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
 from .serializer_nplusone import serializer_nplusone
+from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from . import config as _config
 from . import fixes as _fixes
 from .datetimes import datetime_audit
@@ -61,7 +62,7 @@ EXIT_ERROR = 2
 # Commands that read source and nothing else. Booting Django for these turned
 # a question about Python into a question about settings, and refused to
 # analyse a FastAPI project for reasons that had nothing to do with the ask.
-_FRAMEWORK_FREE = {"async", "profile", "routes"}
+_FRAMEWORK_FREE = {"async", "profile", "routes", "sqla"}
 
 
 def _bootstrap(args: argparse.Namespace) -> None:
@@ -616,6 +617,41 @@ def _cmd_routes(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["critical_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_sqla(args: argparse.Namespace) -> int:
+    report = sqlalchemy_nplusone(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['relationship_count']} relationship(s) across "
+              f"{report['models_with_relationships']} model(s)")
+        print()
+        if not report["finding_count"]:
+            print("No relationship is loaded one row at a time.")
+        if report["in_loops"]:
+            print(f"{report['in_loop_count']} in a loop:")
+            print()
+            for f in report["in_loops"]:
+                print(f"  HIGH   {f['file']}:{f['line']}  in {f['function']}()")
+                print(f"         {f['code']}")
+                print(f"         {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        if report["in_response_models"]:
+            print(f"{report['in_response_model_count']} during response serialisation:")
+            print()
+            for f in report["in_response_models"]:
+                print(f"  HIGH   {f['file']}:{f['line']}  in {f['function']}()")
+                print(f"         {f['response_model']} -> {f['model']}.{f['attribute']}")
+                print(f"         {f['why']}")
+                print(f"         fix: {f['fix']}")
+                print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1423,6 +1459,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any unauthenticated endpoint with an unbounded response")
     p.set_defaults(func=_cmd_routes)
+
+    p = sub.add_parser("sqla",
+                       help="SQLAlchemy relationships loaded one row at a time")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any lazy relationship crossed per row")
+    p.set_defaults(func=_cmd_sqla)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

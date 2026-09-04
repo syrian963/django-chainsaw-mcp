@@ -225,6 +225,15 @@ FastAPI endpoints with no `response_model` and no return annotation, and
 declared models that carry a sensitive field. Unauthenticated is critical,
 behind a dependency is high. Needs no Django.
 
+### `sqla`
+
+```bash
+django-chainsaw sqla [--search-path DIR] [--fail-on-findings]
+```
+
+SQLAlchemy relationships crossed per row: inside a loop, and during response
+serialisation where there is no loop to see. Needs no Django.
+
 ### `indexes`
 
 ```bash
