@@ -153,6 +153,10 @@ def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]
             for declared in sorted(declared_paths):
                 if _covers(declared, used):
                     continue
+                if declared in opt.renamed_prefetches:
+                    # Loaded under a to_attr name, so a read of the relation
+                    # path proves nothing and its absence proves nothing.
+                    continue
                 findings.append({
                     "view": f"{cls.__module__}.{cls.__qualname__}",
                     "serializer": serializer_name,
@@ -191,6 +195,10 @@ def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]
             "relation somewhere this cannot see, and 'delete this "
             "select_related' is a destructive suggestion that reintroduces an "
             "N+1 when it is wrong. A queryset whose paths are built at runtime "
-            "is skipped entirely and counted."
+            "is skipped entirely and counted. A Prefetch(...) object names its "
+            "path as a literal and is read normally, but one carrying to_attr "
+            "loads the relation under another name, so it is passed over: a "
+            "read of the relation path proves nothing there, and neither does "
+            "its absence."
         ),
     }

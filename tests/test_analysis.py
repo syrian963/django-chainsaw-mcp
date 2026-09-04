@@ -939,3 +939,31 @@ def test_a_method_field_makes_it_low_confidence_and_hidden():
     assert key in low
     assert low[key]["confidence"] == "low"
     assert "SerializerMethodField" in low[key]["unreadable_because"]
+
+
+def test_a_prefetch_object_does_not_blind_the_whole_view():
+    # Prefetch(...) is the normal way to prefetch anything filtered. Treating
+    # it as an unreadable runtime path made every view that uses one invisible
+    # to both checks.
+    found = _overfetch()
+    assert ("PrefetchObjectOrderViewSet", "prefetch_related", "reminders") in found
+    # and the paths the serializer does read stay silent
+    assert ("PrefetchObjectOrderViewSet", "prefetch_related", "lines") not in found
+    assert ("PrefetchObjectOrderViewSet", "prefetch_related", "lines__product") not in found
+
+
+def test_a_prefetch_with_to_attr_is_passed_over():
+    # to_attr loads the relation under another name, so a read of the relation
+    # path proves nothing and its absence proves nothing either.
+    assert ("RenamedPrefetchOrderViewSet", "prefetch_related", "reminders") not in _overfetch()
+
+    endpoints = _endpoints()
+    optimises = endpoints["RenamedPrefetchOrderViewSet"]["queryset_optimises"]
+    assert optimises["renamed_prefetches"] == ["reminders"]
+    assert optimises["dynamic"] is False
+
+
+def test_a_prefetch_object_no_longer_marks_the_queryset_dynamic():
+    optimises = _endpoints()["PrefetchObjectOrderViewSet"]["queryset_optimises"]
+    assert optimises["dynamic"] is False
+    assert "reminders" in optimises["prefetch_related"]

@@ -62,6 +62,9 @@ class _QuerysetOptimisation(ast.NodeVisitor):
         # harder to spot because the code looks optimised.
         self.only: set[str] = set()
         self.defer: set[str] = set()
+        # Prefetch(..., to_attr="x") loads the relation under another name.
+        # The path is known, the read is not, so these are kept apart.
+        self.renamed_prefetches: set[str] = set()
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
@@ -81,9 +84,19 @@ class _QuerysetOptimisation(ast.NodeVisitor):
             for argument in node.args:
                 if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
                     target.add(argument.value)
-                else:
+                    continue
+
+                path, renamed = _prefetch_object(argument)
+                if path is None:
                     # A path built at runtime, so the real set is unknown.
                     self.dynamic = True
+                elif renamed:
+                    # `to_attr` moves the result to a different attribute, so
+                    # the serializer reads it under that name and nothing
+                    # matching the relation path proves anything either way.
+                    self.renamed_prefetches.add(path)
+                else:
+                    target.add(path)
         self.generic_visit(node)
 
 
@@ -210,6 +223,29 @@ def _view_classes() -> list[Any]:
 
     walk(GenericAPIView)
     return found
+
+
+def _prefetch_object(node: ast.AST) -> tuple[str | None, bool]:
+    """`Prefetch("lines", queryset=...)` -> ("lines", False).
+
+    A Prefetch object still names its path as a literal first argument; only
+    the rows it loads are customised. Treating the whole queryset as unknown
+    because one of these appeared made every view that uses them invisible,
+    and they are the normal way to prefetch anything filtered.
+
+    The second value is True for `to_attr`, which puts the result somewhere
+    else entirely.
+    """
+    if not isinstance(node, ast.Call):
+        return None, False
+    name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+    if name != "Prefetch" or not node.args:
+        return None, False
+    first = node.args[0]
+    if not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
+        return None, False
+    renamed = any(k.arg == "to_attr" for k in node.keywords)
+    return first.value, renamed
 
 
 def _optimisations(cls: Any) -> _QuerysetOptimisation:
@@ -500,6 +536,7 @@ def endpoint_cost(
                     "select_related_all": opt.select_related_all,
                     "only": sorted(opt.only),
                     "defer": sorted(opt.defer),
+                    "renamed_prefetches": sorted(opt.renamed_prefetches),
                     "dynamic": opt.dynamic,
                 },
                 "breakdown": breakdown,

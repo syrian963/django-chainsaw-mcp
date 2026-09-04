@@ -7,7 +7,9 @@ what it needs. The estimator should put several hundred queries between them.
 from rest_framework import serializers, viewsets
 from rest_framework.pagination import PageNumberPagination
 
-from .models import Order, Product
+from django.db.models import Prefetch
+
+from .models import Order, Product, Reminder
 from .api_serializers import ProductSerializer
 
 
@@ -155,3 +157,31 @@ class OpaqueOrderViewSet(viewsets.ReadOnlyModelViewSet):
 
     serializer_class = MethodFieldOrderSerializer
     queryset = Order.objects.select_related("customer")
+
+
+class PrefetchObjectOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """Prefetch objects, which is the normal way to prefetch anything filtered.
+
+    The whole view used to be invisible to both checks because one of these
+    appeared in the queryset. `lines` is read by the serializer; `reminders`
+    is not, and that is the finding.
+    """
+
+    serializer_class = OrderDetailSerializer
+    queryset = Order.objects.select_related("customer").prefetch_related(
+        Prefetch("lines"),
+        Prefetch("lines__product"),
+        Prefetch("lines__product__category"),
+        Prefetch("reminders", queryset=Reminder.objects.filter(due_at__isnull=False)),
+    )
+
+
+class RenamedPrefetchOrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """to_attr puts the result somewhere else, so neither presence nor absence
+    of a read on the relation path says anything."""
+
+    serializer_class = OrderDetailSerializer
+    queryset = Order.objects.select_related("customer").prefetch_related(
+        "lines", "lines__product", "lines__product__category",
+        Prefetch("reminders", queryset=Reminder.objects.all(), to_attr="due_reminders"),
+    )

@@ -295,6 +295,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A `Prefetch(...)` object made the whole view invisible.** Any non-literal
+  argument to `prefetch_related` marked the queryset as built at runtime, which
+  skipped the view in `unused_eager_loading` and made `endpoint_cost` an upper
+  bound - and `Prefetch` is the normal way to prefetch anything filtered. The
+  path is a literal first argument and is now read normally. One carrying
+  `to_attr` is kept apart instead: it loads the relation under another name, so
+  a read of the relation path proves nothing and its absence proves nothing.
+
 - **A ForeignKey column was reported as needing an index it already has.**
   `filter(date_id=...)` names the same indexed column as `date`, and Django
   indexes every FK by default, but only `field.name` was recorded as covered -
