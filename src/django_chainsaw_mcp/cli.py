@@ -739,6 +739,8 @@ def _cmd_loops(args: argparse.Namespace) -> int:
     report = queries_in_loops(
         search_path=args.search_path,
         include_writes=not args.no_writes,
+        follow_calls=not args.no_follow_calls,
+        max_depth=args.max_depth,
     )
     _emit(report, args.json)
 
@@ -749,6 +751,7 @@ def _cmd_loops(args: argparse.Namespace) -> int:
             (report["per_row"], "once per row"),
             (report["loop_invariant"], "the same query every iteration"),
             (report["writes_in_loops"], "a write per row"),
+            (report["through_a_call"], "a query in a function the loop calls"),
         ):
             if not bucket:
                 continue
@@ -759,6 +762,8 @@ def _cmd_loops(args: argparse.Namespace) -> int:
                       f"(loop at line {f['loop_at_line']})")
                 print(f"            {f['code']}")
                 print(f"            {f['why']}")
+                if f.get("reached_through"):
+                    print(f"            path: {' -> '.join(f['reached_through'])}")
                 print(f"            fix: {f['fix']}")
                 print()
         print(report["note"])
@@ -1613,6 +1618,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--search-path", metavar="DIR")
     p.add_argument("--no-writes", action="store_true",
                    help="only report reads")
+    p.add_argument("--no-follow-calls", action="store_true",
+                   help="only read the loop body, do not follow calls out of it")
+    p.add_argument("--max-depth", type=int, default=3, metavar="N",
+                   help="how many calls to follow out of a loop (default: 3)")
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any query that runs once per row")
     p.set_defaults(func=_cmd_loops)

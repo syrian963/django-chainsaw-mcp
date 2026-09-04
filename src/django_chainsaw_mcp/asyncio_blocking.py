@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from . import callgraph
-from .project import get_profile, resolve_root
+from .project import TreeCache, get_profile, resolve_root
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
@@ -240,7 +240,7 @@ def blocking_in_async(
     # Which project functions block, directly, so an async caller can be told.
     blocking_functions: dict[str, dict[str, Any]] = {}
     if graph is not None:
-        trees = _TreeCache(root)
+        trees = TreeCache(root)
         for fn in graph.functions.values():
             node = trees.function(fn)
             if node is None:
@@ -360,43 +360,9 @@ def blocking_in_async(
     }
 
 
-class _TreeCache:
-    """One parse per file, and the definitions in it indexed by (name, line).
-
-    The blocking-function pass asked for one function at a time and re-parsed
-    the whole file for each. On a project with 11300 functions across two
-    thousand files that was 60 seconds spent to check a single async function.
-    """
-
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self._index: dict[str, dict[tuple[str, int], ast.AST] | None] = {}
-
-    def _file(self, relative: str) -> dict[tuple[str, int], ast.AST] | None:
-        if relative not in self._index:
-            try:
-                source = (self.root / relative).read_text(encoding="utf-8", errors="replace")
-                tree = ast.parse(source)
-            except (OSError, SyntaxError):
-                self._index[relative] = None
-                return None
-            self._index[relative] = {
-                (node.name, node.lineno): node
-                for node in ast.walk(tree)
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            }
-        return self._index[relative]
-
-    def function(self, fn: Any) -> ast.AST | None:
-        index = self._file(fn.file)
-        if index is None:
-            return None
-        return index.get((fn.name, fn.line))
-
-
 def _function_node(root: Path, fn: Any) -> ast.AST | None:
     """Kept for callers outside the hot loop; the cache is what the loop uses."""
-    return _TreeCache(root).function(fn)
+    return TreeCache(root).function(fn)
 
 
 def _qualname_for(graph: Any, relative: str, node: ast.AST) -> str | None:

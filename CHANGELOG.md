@@ -5,6 +5,20 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`queries_in_loops` follows calls out of the loop.** A loop whose body
+  contains no ORM call at all can still run one query per row, because the query
+  is in a function the loop calls. In a codebase organised into services that is
+  the normal shape, and the check could not see it. Plain calls made inside a
+  loop are now resolved through the project call graph and reported when a query
+  is reachable within `--max-depth` hops (three by default). The finding carries
+  the path it took, ending at the query itself rather than at the function
+  holding it. A call that reaches nothing stays silent.
+- **Comprehensions count as loops.** `[enrich(o) for o in orders]` is the most
+  idiomatic form of this bug and was the one shape the first version missed.
+- `loops` gained `--no-follow-calls` and `--max-depth`.
+
 ### Changed
 
 - **`check` runs what applies to the project in front of it.** The aggregate
@@ -17,6 +31,11 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   project every check still runs and nothing is skipped.
 
 ### Fixed
+
+- **The iterable of a loop was treated as being inside it.**
+  `for o in Order.objects.all():` evaluates the queryset once, before the first
+  iteration, so reporting it flagged the one line in the whole pattern that is
+  fine.
 
 - **An atomic file write dropped the executable bit.** Writing to a temp file
   and renaming is the right way to avoid destroying a file on a failed write,

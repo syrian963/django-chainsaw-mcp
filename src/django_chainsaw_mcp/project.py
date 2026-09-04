@@ -192,3 +192,40 @@ def resolve_root(search_path: str | None = None, *, need_django: bool = False) -
     if not root.is_dir():
         raise ValueError(f"search_path is not a directory: {root}")
     return root
+
+
+class TreeCache:
+    """One parse per file, with its function definitions indexed.
+
+    Two checks walk a call graph and then want the AST of one function at a
+    time. Re-parsing the file for each of them cost 60 seconds on a project
+    with 11300 functions, so the parse is done once and the definitions in it
+    are indexed by (name, line) - which is exactly how the call graph
+    identifies them.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._index: dict[str, dict[tuple[str, int], Any] | None] = {}
+
+    def definitions(self, relative: str) -> dict[tuple[str, int], Any] | None:
+        if relative not in self._index:
+            try:
+                source = (self.root / relative).read_text(encoding="utf-8", errors="replace")
+                tree = ast.parse(source)
+            except (OSError, SyntaxError):
+                self._index[relative] = None
+                return None
+            self._index[relative] = {
+                (node.name, node.lineno): node
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+        return self._index[relative]
+
+    def function(self, fn: Any) -> Any | None:
+        """The AST node for one call-graph function, or None."""
+        index = self.definitions(fn.file)
+        if index is None:
+            return None
+        return index.get((fn.name, fn.line))

@@ -1496,3 +1496,37 @@ def test_the_four_correct_shapes_are_silent():
     everything = per_row | invariant | writes
     for name in ("already_fixed", "hoisted", "not_a_query", "small_literal_list"):
         assert not _in(everything, name), name
+
+
+def test_a_loop_that_calls_a_function_which_queries_is_found():
+    # Nothing in the loop body looks like a query, and there is one per row.
+    # This is the shape a codebase organised into services actually has.
+    from django_chainsaw_mcp.loop_queries import queries_in_loops
+
+    report = queries_in_loops()
+    reached = {f["queries_in"].rsplit(".", 1)[-1] for f in report["through_a_call"]}
+    assert "enrich" in reached
+
+
+def test_both_the_comprehension_and_the_statement_form_are_found():
+    # [enrich(o) for o in orders] is the most idiomatic way to write this and
+    # was the one shape the check could not see.
+    _, _, _, report = _loops()
+    lines = {f["line"] for f in report["through_a_call"] if f["file"].endswith("loops.py")}
+    assert _in(lines, "through_a_call")
+    assert _in(lines, "through_a_call_stmt")
+
+
+def test_a_loop_calling_something_that_never_queries_is_silent():
+    _, _, _, report = _loops()
+    lines = {f["line"] for f in report["through_a_call"] if f["file"].endswith("loops.py")}
+    assert not _in(lines, "calls_something_harmless")
+
+
+def test_the_iterable_of_a_loop_is_not_a_query_inside_it():
+    # `for p in Product.objects.all():` evaluates the queryset once. Reporting
+    # it would flag the one line in the whole pattern that is fine.
+    per_row, invariant, _, _ = _loops()
+    assert not _in(per_row | invariant, "iterable_is_evaluated_once")
+    # and the same for a comprehension's outermost iterable
+    assert not _in(per_row | invariant, "already_fixed")

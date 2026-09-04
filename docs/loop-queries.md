@@ -40,6 +40,51 @@ for order in orders:
 something wraps the loop. `bulk_update` fixes it and skips the signals, which
 is its own decision — [`bypass.md`](bypass.md) is the check for that side.
 
+## The fourth shape: the loop body that looks clean
+
+```python
+for order in orders:
+    enrich(order)          # nothing here looks like a query
+```
+
+```python
+def enrich(order):
+    order.customer = Customer.objects.get(pk=order.customer_id)
+```
+
+Nothing in the loop body is an ORM call, and there is still one query per row.
+This is the normal shape in a codebase organised into services, and it is the
+shape a check that only reads the loop body cannot see at all — which is what
+this one did until the call graph was joined to it.
+
+The call is resolved through the project-wide call graph and followed up to
+`--max-depth` hops (three by default), so a loop calling a helper that calls a
+repository that queries is still found. The finding carries the path it took:
+
+```
+2 a query in a function the loop calls:
+
+  HIGH      shop/loops.py:75  (loop at line 75)
+            return [enrich(order) for order in orders]
+            this call reaches shop.loops.enrich, which queries. Nothing in
+            the loop body looks like a query, so this one is easy to miss
+            path: shop.loops.enrich -> Customer.objects.get
+            fix: fetch what the callee needs before the loop and pass it in,
+                 or give it a bulk form that takes the whole list
+```
+
+The path ends at the query, not at the function holding it — naming only
+`enrich` leaves the reader to go and find out what `enrich` does.
+
+`--no-follow-calls` turns this off and reads loop bodies only; `--max-depth N`
+changes how far the chain is followed.
+
+Comprehensions count as loops here — `[enrich(o) for o in orders]` is the most
+idiomatic way to write it and was the one form the first version missed.
+
+A call that reaches nothing is silent: the graph is walked to see whether a
+query is reachable, not to guess.
+
 ## What it looks like
 
 ```
@@ -89,9 +134,11 @@ worth being told apart from the one that needs a real decision.
 
 ## What it cannot see
 
-- **A query inside a function the loop calls.** The loop and the query have to
-  be in the same function. A helper called per row is invisible here — the call
-  graph knows the edge, and joining the two is the obvious next step.
+- **Past three calls.** The chain is followed to `--max-depth` hops, three by
+  default. A query four helpers deep is not reported.
+- **A helper that only sometimes queries.** Reaching a querying function is
+  enough; whether the branch holding the query actually runs is not decided
+  here.
 - **Whether the loop is short.** Three rows and three million rows produce the
   same finding, because the row count is a property of the data.
 - **A queryset already evaluated.** Iterating a list that was fetched once, and

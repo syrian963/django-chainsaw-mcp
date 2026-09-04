@@ -63,3 +63,37 @@ def small_literal_list():
     for sku in ("a", "b"):
         out.append(Product.objects.filter(sku=sku).first())
     return out
+
+
+def enrich(order):
+    """One file away from any loop, and it queries."""
+    return Customer.objects.get(pk=order.customer_id).name
+
+
+def through_a_call(orders):
+    """Nothing in this loop body looks like a query."""
+    return [enrich(order) for order in orders]
+
+
+def through_a_call_stmt(orders):
+    """The statement form, so the comprehension is not the only case."""
+    names = []
+    for order in orders:
+        names.append(enrich(order))
+    return names
+
+
+def pure_helper(value):
+    """No query anywhere. A loop calling this is not a finding."""
+    return value * 2
+
+
+def calls_something_harmless(orders):
+    for order in orders:
+        pure_helper(order.pk)
+
+
+def iterable_is_evaluated_once():
+    """The queryset in the `in` position runs once, not once per row."""
+    for product in Product.objects.all():
+        yield product.sku
