@@ -50,6 +50,7 @@ from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
 from .indexes import missing_indexes
 from .introspect import list_models
+from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .scan import scan_templates
 from .serializers import serializer_exposure
@@ -730,6 +731,39 @@ def _cmd_celery(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_loops(args: argparse.Namespace) -> int:
+    report = queries_in_loops(
+        search_path=args.search_path,
+        include_writes=not args.no_writes,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"No database work inside a loop in {report['files_scanned']} file(s).")
+        for bucket, heading in (
+            (report["per_row"], "once per row"),
+            (report["loop_invariant"], "the same query every iteration"),
+            (report["writes_in_loops"], "a write per row"),
+        ):
+            if not bucket:
+                continue
+            print(f"{len(bucket)} {heading}:")
+            print()
+            for f in bucket:
+                print(f"  {f['severity'].upper():<9} {f['file']}:{f['line']}  "
+                      f"(loop at line {f['loop_at_line']})")
+                print(f"            {f['code']}")
+                print(f"            {f['why']}")
+                print(f"            fix: {f['fix']}")
+                print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_severity_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1574,6 +1608,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any task given the wrong thing")
     p.set_defaults(func=_cmd_celery)
+
+    p = sub.add_parser("loops", help="database work written inside a loop")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--no-writes", action="store_true",
+                   help="only report reads")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any query that runs once per row")
+    p.set_defaults(func=_cmd_loops)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

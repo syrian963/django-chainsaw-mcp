@@ -45,6 +45,7 @@ from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
+from .loop_queries import queries_in_loops as _queries_in_loops
 from .migrations import migration_risk as _migration_risk
 from .project import get_profile as _get_profile
 from .project import resolve_root as _resolve_root
@@ -533,6 +534,44 @@ def celery_arguments(search_path: str | None = None) -> dict[str, Any]:
         search_path: directory to scan. Defaults to the configured project.
     """
     return _guard(_celery_arguments, search_path=search_path)
+
+
+@mcp.tool()
+def queries_in_loops(
+    search_path: str | None = None,
+    include_writes: bool = True,
+) -> dict[str, Any]:
+    """Database work written inside a loop, split by what the fix is.
+
+    The template and serializer checks here find the N+1 a framework causes.
+    This finds the one somebody wrote by hand, which is where it lives in a
+    codebase whose views build their responses themselves.
+
+    Three shapes share one appearance and need three different fixes:
+
+        Customer.objects.get(pk=order.customer_id)   uses the loop variable:
+                                                     once per row, needs a bulk
+                                                     fetch or a prefetch
+        Config.objects.get(key="vat")                does not: the same
+                                                     question N times for the
+                                                     same answer, move it above
+                                                     the loop
+        order.save()                                 N round trips; bulk_update
+                                                     fixes it and skips signals
+
+    django-check does static N+1 for relation access in a loop and is the
+    closest existing tool; nplusone and the debug toolbar find it at runtime.
+    The separation is what is added here.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        include_writes: also report save()/delete() inside a loop.
+    """
+    return _guard(
+        _queries_in_loops,
+        search_path=search_path,
+        include_writes=include_writes,
+    )
 
 
 @mcp.tool()

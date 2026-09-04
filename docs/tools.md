@@ -595,6 +595,23 @@ Documented in [`celery.md`](celery.md).
 
 ---
 
+## `queries_in_loops`
+
+Database work written inside a loop, separated into the three shapes that need
+three different fixes.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_writes` | `true` | also report `save()`/`delete()` inside a loop |
+
+A loop over a literal list is not treated as a loop over rows for reads, and
+tests are skipped.
+
+Documented in [`loop-queries.md`](loop-queries.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

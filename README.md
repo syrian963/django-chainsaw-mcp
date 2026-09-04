@@ -86,6 +86,7 @@ well as the project path.
 | `race_conditions` | Counters read into Python, changed, and saved. Also unsafe upserts. |
 | `money_precision` | **Where a decimal amount stops being exact.** |
 | `celery_arguments` | **What the worker actually receives**, and whether it can even be called. |
+| `queries_in_loops` | Queries written inside a loop, split by which of three fixes applies. |
 | `open_endpoints` | Sensitive fields on endpoints anybody can call. |
 | `unused_eager_loading` | Joins and prefetches nothing in the response reads. |
 | `check` | Run everything that applies, one severity-sorted list, one exit code. |

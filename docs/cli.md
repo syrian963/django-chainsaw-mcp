@@ -281,6 +281,16 @@ django-chainsaw celery [--search-path DIR] [--fail-on-findings]
 Model instances handed to Celery tasks, and dispatches whose argument count
 cannot match the task. Also in the aggregate `check` as `celery`.
 
+### `loops`
+
+```bash
+django-chainsaw loops [--search-path DIR] [--no-writes] [--fail-on-findings]
+```
+
+Database work inside a loop, split into the query that uses the loop variable
+(once per row), the one that does not (the same answer N times), and the write.
+Also in the aggregate `check` as `loops`.
+
 ### `indexes`
 
 ```bash

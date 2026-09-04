@@ -32,6 +32,7 @@ from .bypass import bypassed_effects
 from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
 from .celery_tasks import celery_arguments
+from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
@@ -300,6 +301,18 @@ def _from_celery(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for bucket in ("per_row", "loop_invariant", "writes_in_loops"):
+        for f in report.get(bucket, []):
+            out.append(_finding(
+                "loops", f["severity"],
+                f"{f['call']} runs inside the loop at line {f['loop_at_line']}",
+                f"{f['file']}:{f['line']}", f["why"], f["fix"],
+            ))
+    return out
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for entry in report.get("migrations", []):
@@ -331,6 +344,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "races": (race_conditions, lambda o: {}, _from_races),
     "money": (money_precision, lambda o: {}, _from_money),
     "celery": (celery_arguments, lambda o: {}, _from_celery),
+    "loops": (queries_in_loops, lambda o: {}, _from_loops),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
     "async": (blocking_in_async, lambda o: {}, _from_async),
@@ -355,6 +369,7 @@ _REQUIRES: dict[str, str] = {
     "races": "django",
     "money": "django",
     "celery": "django",
+    "loops": "django",
     "open": "django",
     "migrations": "django",
     "async": "any",

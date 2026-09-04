@@ -1425,3 +1425,74 @@ def test_the_async_check_does_not_build_a_call_graph_for_nothing():
     assert report["finding_count"] == 0
     assert "no async functions" in report["note"]
     assert elapsed < 2.0, f"took {elapsed:.1f}s to say there is no async code"
+
+
+def _loops():
+    from django_chainsaw_mcp.loop_queries import queries_in_loops
+
+    report = queries_in_loops()
+    def lines(bucket):
+        return {f["line"] for f in report[bucket] if f["file"].endswith("loops.py")}
+    return lines("per_row"), lines("loop_invariant"), lines("writes_in_loops"), report
+
+
+def _loops_spans():
+    import ast
+    import io
+    from pathlib import Path
+
+    from django_chainsaw_mcp.django_env import ensure_django
+
+    root = Path(ensure_django().project_path)
+    tree = ast.parse(io.open(root / "shop" / "loops.py", encoding="utf-8").read())
+    return {
+        node.name: (node.lineno, node.end_lineno)
+        for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+
+
+def _in(lines, name):
+    start, end = _loops_spans()[name]
+    return any(start <= line <= end for line in lines)
+
+
+def test_a_query_using_the_loop_variable_runs_once_per_row():
+    per_row, _, _, _ = _loops()
+    assert _in(per_row, "per_row")
+
+
+def test_a_query_that_ignores_the_loop_variable_is_a_different_finding():
+    # Same shape, different fix: it belongs above the loop and there is
+    # nothing to trade off.
+    per_row, invariant, _, _ = _loops()
+    assert _in(invariant, "loop_invariant")
+    assert not _in(per_row, "loop_invariant")
+
+
+def test_a_nested_loop_raises_the_severity():
+    _, _, _, report = _loops()
+    nested = [f for f in report["per_row"]
+              if f["file"].endswith("loops.py") and f["loop_depth"] > 1]
+    assert nested and nested[0]["severity"] == "critical"
+
+
+def test_a_write_in_a_loop_is_its_own_category():
+    _, _, writes, _ = _loops()
+    assert _in(writes, "writes_per_row")
+
+
+def test_a_chained_lookup_is_one_finding_not_one_per_link():
+    # Invoice.objects.filter(...).first() is two qualifying calls and one
+    # query; reporting both doubled every chained lookup.
+    _, _, _, report = _loops()
+    start, end = _loops_spans()["nested"]
+    inside = [f for f in report["per_row"]
+              if f["file"].endswith("loops.py") and start <= f["line"] <= end]
+    assert len(inside) == 1, inside
+
+
+def test_the_four_correct_shapes_are_silent():
+    per_row, invariant, writes, _ = _loops()
+    everything = per_row | invariant | writes
+    for name in ("already_fixed", "hoisted", "not_a_query", "small_literal_list"):
+        assert not _in(everything, name), name

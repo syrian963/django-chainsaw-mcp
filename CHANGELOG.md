@@ -54,6 +54,29 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`queries_in_loops`**: database work written inside a loop, separated into
+  the three shapes that share one appearance and need three different fixes. A
+  query that uses the loop variable runs once per row and needs a bulk fetch or
+  a prefetch. A query that ignores it asks the same question N times for the
+  same answer and simply belongs above the loop - nothing to trade off. A write
+  is N round trips, and the bulk fix skips signals, which `bypassed_effects` is
+  the check for. A nested loop raises the first case to critical.
+
+  This closes a real gap: the template and serializer checks find the N+1 a
+  framework causes, and on a large real project 152 of the DRF views declare no
+  `serializer_class` at all, so every cost check was silent about all of them.
+
+  `django-check` does static N+1 for relation access in a loop and is the
+  closest existing tool; `nplusone` and the debug toolbar find it at runtime.
+  The separation is what is added - "there is a query in this loop" and "this
+  query belongs three lines higher" are different findings with different
+  fixes.
+
+  Silent on a loop over a literal list, on `dict.get()` and `list.count()`, and
+  in tests. A chained lookup counts once: `Invoice.objects.filter(...).first()`
+  is two qualifying calls and one query, and reporting both doubled every
+  chained lookup in the first version.
+
 - **`celery_arguments`**: model instances handed to Celery tasks, and
   dispatches whose argument count cannot match the task. The worker does not
   receive the instance - it receives whatever the serialiser made of it,
