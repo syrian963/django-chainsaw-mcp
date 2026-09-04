@@ -1029,3 +1029,49 @@ def test_correctly_written_money_code_is_silent():
     for name in ("correct_gross", "not_money"):
         start, end = spans[name]
         assert not [ln for ln in lines if start <= ln <= end], name
+
+
+def _migrations():
+    from django_chainsaw_mcp.migrations import migration_risk
+
+    return migration_risk()
+
+
+def test_a_data_migration_with_no_reverse_is_named():
+    # Reversibility is a different question from row impact: a harmless data
+    # migration with no reverse is still why a rollback fails at 3am.
+    report = _migrations()
+    kinds = {(e["name"], e["operation"]) for e in report["irreversible"]}
+    assert ("0003_backfill_stock", "RunPython") in kinds
+    assert ("0003_backfill_stock", "RunSQL") in kinds
+
+
+def test_a_declared_reverse_including_noop_is_not_reported():
+    # noop says going backwards should do nothing; None says nobody decided,
+    # and the two are indistinguishable later unless one of them is written.
+    report = _migrations()
+    entry = next(e for e in report["migrations"] if e["name"] == "0003_backfill_stock")
+    reversible = [op["reversible"] for op in entry["operations"]]
+    assert reversible.count(True) == 2, reversible
+    assert reversible.count(False) == 2, reversible
+
+
+def test_a_schema_operation_has_no_reversibility_question():
+    report = _migrations()
+    for entry in report["migrations"]:
+        for op in entry["operations"]:
+            if op["operation"] not in {"RunPython", "RunSQL"}:
+                assert op["reversible"] is None, op
+
+
+def test_raw_sql_is_inventoried_so_clear_can_be_qualified():
+    # "clear" means nothing was found here. These are the specific places the
+    # search could not read, and they are short enough to check by hand.
+    from django_chainsaw_mcp.deploy_safety import deploy_safety
+
+    report = deploy_safety()
+    kinds = {(e["file"].rsplit("/", 1)[-1], e["kind"]) for e in report["raw_sql_sites"]}
+    assert ("rawsql.py", "cursor.execute()") in kinds
+    assert ("rawsql.py", ".raw()") in kinds
+    assert report["raw_sql_count"] == len(report["raw_sql_sites"])
+    assert "build SQL by hand" in report["note"]

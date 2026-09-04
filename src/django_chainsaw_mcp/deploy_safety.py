@@ -191,6 +191,52 @@ def _project_app_labels(root: Path) -> set[str]:
     return labels
 
 
+def _raw_sql_sites(root: Path) -> list[dict[str, Any]]:
+    """Every place this project writes SQL by hand.
+
+    The column-reference search reads the ORM and templates. SQL assembled as
+    a string is opaque to it, and a `clear` verdict on a RemoveField is only
+    worth as much as the reader's confidence that nothing hand-written mentions
+    the column. Listing the sites turns that from an unbounded worry into a
+    finite list - usually a short one.
+    """
+    out: list[dict[str, Any]] = []
+    for path in root.rglob("*.py"):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError):
+            continue
+        lines = source.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            kind = None
+            if name == "execute" and isinstance(func, ast.Attribute):
+                target = func.value
+                base = getattr(target, "attr", None) or getattr(target, "id", None) or ""
+                if "cursor" in str(base).lower():
+                    kind = "cursor.execute()"
+            elif name in {"raw", "extra"}:
+                kind = f".{name}()"
+            elif name == "RunSQL":
+                kind = "RunSQL"
+            if kind is None:
+                continue
+            out.append({
+                "file": str(path.relative_to(root)),
+                "line": node.lineno,
+                "kind": kind,
+                "code": lines[node.lineno - 1].strip()[:140] if node.lineno <= len(lines) else "",
+            })
+    out.sort(key=lambda entry: (entry["file"], entry["line"]))
+    return out
+
+
 def deploy_safety(
     search_path: str | None = None,
     max_hits_per_symbol: int = 25,
@@ -289,8 +335,12 @@ def deploy_safety(
                 )
                 clear.append(entry)
 
+    raw_sql = _raw_sql_sites(root)
+
     return {
         "database_reachable": db_reachable,
+        "raw_sql_sites": raw_sql,
+        "raw_sql_count": len(raw_sql),
         "search_path": str(root),
         "project_apps": sorted(own_apps),
         "skipped_third_party_apps": sorted(skipped_apps),
@@ -304,6 +354,17 @@ def deploy_safety(
             "cannot produce a hit; templates use patterns. Dynamic access such "
             "as getattr(obj, name), raw SQL built at runtime, and references in "
             "other repositories are invisible. 'clear' means nothing was found "
-            "here, not that nothing exists anywhere."
+            "here, not that nothing exists anywhere.\n\n"
+            + (
+                f"{len(raw_sql)} place(s) in this project build SQL by hand "
+                "(cursor.execute, .raw(), .extra(), RunSQL). Those are listed "
+                "under raw_sql_sites and none of them were searched for column "
+                "references, so a 'clear' verdict is clear except for these. "
+                "They are the specific reason the sentence above is not a "
+                "guarantee, and they are short enough to read."
+                if raw_sql else
+                "No raw SQL was found in this project, so the search covered "
+                "every place a column name could reasonably appear."
+            )
         ),
     }

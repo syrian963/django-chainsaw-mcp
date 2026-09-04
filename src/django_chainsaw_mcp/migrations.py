@@ -24,6 +24,52 @@ REWRITES_TABLE = "rewrites_table"
 SAFE = "safe"
 
 
+def _reversible(operation: Any) -> dict[str, Any] | None:
+    """Can this operation be undone, and does the migration say so?
+
+    Every schema operation Django ships knows how to reverse itself. RunPython
+    and RunSQL do not: without `reverse_code` / `reverse_sql` they raise
+    IrreversibleError on the way back, so `migrate <app> <previous>` fails and
+    the rollback that a bad deploy needs is not available.
+
+    This is not the same question as "is this operation risky". A safe data
+    migration can still be the reason a rollback is impossible at 3am, and a
+    dangerous one that declares its reverse is not.
+    """
+    name = type(operation).__name__
+    if name == "RunPython":
+        reverse = getattr(operation, "reverse_code", None)
+    elif name == "RunSQL":
+        reverse = getattr(operation, "reverse_sql", None)
+    else:
+        return None
+
+    if reverse is None:
+        return {
+            "reversible": False,
+            "why": (
+                f"{name} without a reverse. Migrating backwards past this "
+                "raises IrreversibleError, so rolling the deploy back is not "
+                "an option once it has run"
+            ),
+            "fix": (
+                "give it a reverse that undoes the change, or "
+                "migrations.RunPython.noop if going backwards genuinely needs "
+                "to do nothing - noop is a decision, None is an oversight and "
+                "they are indistinguishable later"
+            ),
+        }
+
+    noop = getattr(reverse, "__name__", "") == "noop" or reverse is getattr(
+        __import__("django.db.migrations", fromlist=["RunPython"]).RunPython, "noop", None
+    )
+    return {
+        "reversible": True,
+        "why": f"{name} declares a reverse" + (" (noop)" if noop else ""),
+        "fix": None,
+    }
+
+
 def _classify(operation: Any) -> dict[str, Any]:
     name = type(operation).__name__
 
@@ -136,6 +182,8 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     counts = {BLOCKS_WRITES: 0, BREAKS_OLD_CODE: 0, REWRITES_TABLE: 0, SAFE: 0}
 
+    irreversible: list[dict[str, Any]] = []
+
     for key, migration in sorted(loader.disk_migrations.items()):
         is_applied = key in applied
         if is_applied and not include_applied:
@@ -145,9 +193,21 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
         for operation in migration.operations:
             verdict = _classify(operation)
             counts[verdict["risk"]] = counts.get(verdict["risk"], 0) + 1
+            reversibility = _reversible(operation)
+            if reversibility is not None and not reversibility["reversible"]:
+                irreversible.append(
+                    {
+                        "app": key[0],
+                        "name": key[1],
+                        "operation": type(operation).__name__,
+                        "why": reversibility["why"],
+                        "fix": reversibility["fix"],
+                    }
+                )
             operations.append(
                 {
                     "operation": type(operation).__name__,
+                    "reversible": None if reversibility is None else reversibility["reversible"],
                     "target": getattr(operation, "model_name", None)
                     or getattr(operation, "name", None),
                     "field": getattr(operation, "name", None)
@@ -176,6 +236,8 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
 
     risky = [e for e in entries if e["worst_risk"] != SAFE]
     return {
+        "irreversible": irreversible,
+        "irreversible_count": len(irreversible),
         "database_reachable": db_reachable,
         "migration_count": len(entries),
         "risky_count": len(risky),
@@ -188,6 +250,12 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
             SAFE: "no effect on existing rows",
         },
         "note": (
+            "Reversibility is tracked separately from row impact, because they "
+            "are different questions: a harmless data migration with no reverse "
+            "is still the reason a rollback fails, and a dangerous one that "
+            "declares its reverse is not. RunPython.noop counts as declared - "
+            "it says going backwards should do nothing, where None says nobody "
+            "decided.\n\n"
             "Static reading of migration operations. It does not know your row "
             "counts, your PostgreSQL version or your deploy strategy, all of "
             "which change how bad a given operation actually is."

@@ -7,6 +7,23 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`migration_risk` reports which migrations cannot be rolled back.**
+  `RunPython` and `RunSQL` are the only operations Django cannot reverse on
+  their own: without `reverse_code` / `reverse_sql` they raise
+  `IrreversibleError`, so `migrate <app> <previous>` fails and the rollback a
+  bad deploy needs is not available. This is tracked separately from row
+  impact, because they are different questions - a harmless data migration
+  with no reverse is still why a rollback fails at 3am, and a dangerous one
+  that declares its reverse is not. `RunPython.noop` counts as declared: it
+  says going backwards should do nothing, where `None` says nobody decided,
+  and the two are indistinguishable afterwards.
+- **`deploy_safety` inventories the raw SQL that qualifies its verdict.**
+  Its `clear` result always meant "nothing was found here", with hand-written
+  SQL named as the reason that is not a guarantee. The `cursor.execute()`,
+  `.raw()`, `.extra()` and `RunSQL` sites are now listed, so the unbounded
+  worry becomes a finite list - usually a short one - that a reviewer can
+  actually check before dropping a column.
+
 - **`money_precision`**: places where a decimal amount stops being exact.
   A `DecimalField` exists so that money is exact, and four things give that up
   somewhere the model definition cannot see: `Decimal(<inexact float>)`, which
