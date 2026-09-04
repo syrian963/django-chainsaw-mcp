@@ -11,7 +11,8 @@ looked at answer *what will hurt*:
 - where the N+1 queries are,
 - which pending migration stops writes or breaks the code that is still running
   during a rolling deploy,
-- and whether a destructive migration is safe to ship **yet**.
+- whether a destructive migration is safe to ship **yet**,
+- and which queries read tenant-scoped rows without scoping the query.
 
 Everything is read-only, and most of it never touches the database.
 
@@ -33,6 +34,7 @@ Everything is read-only, and most of it never touches the database.
 | `scan_templates` | The same across a directory, resolving context from views. |
 | `migration_risk` | Migrations rated: blocks writes, rewrites the table, breaks running code. |
 | `deploy_safety` | **Is this destructive migration safe to ship yet?** |
+| `find_unscoped_queries` | **Which queries read data the caller may not own?** The IDOR shape. |
 
 Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
@@ -64,6 +66,31 @@ CLEAR    shop.0002_remove_product_legacy_code  RemoveField 'legacy_code'
 
 Python is parsed with the AST, so comments and docstrings cannot produce a hit.
 Why and how: [`docs/deploy-safety.md`](docs/deploy-safety.md).
+
+## The second one worth reading about
+
+```python
+def order_detail(request, pk):
+    return Order.objects.get(pk=pk)
+```
+
+Nothing is wrong with that line, and it is how most IDOR reports start. This
+class of bug is hard for static analysis because **the defect is the absence of
+a filter, and absence has no syntax**: there is no dangerous call to match on.
+The tools that work today are runtime or architectural.
+
+The model graph makes it checkable. A generic analyser does not know whether
+`Order` belongs to anybody; this one knows it reaches the tenant root through
+`customer`, so it can say that filtering on `pk` alone is not enough:
+
+```
+high    shop/api.py:14   Order.objects.get(pk=pk)
+        shop.Order is owned via 'customer', filtered on ['pk']
+        add: .filter(customer=<the request user>)
+```
+
+Models with no path to the owner, like the product catalogue, are never
+reported. Details and the blind spots: [`docs/tenancy.md`](docs/tenancy.md).
 
 ## Quick start
 
@@ -136,6 +163,7 @@ someone in the wrong direction.
 | [`docs/architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
 | [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
 | [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |
+| [`docs/tenancy.md`](docs/tenancy.md) | the IDOR shape, and why the model graph makes it checkable |
 | [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
 | [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |

@@ -186,6 +186,28 @@ Every unapplied `RemoveField`, `RenameField`, `DeleteModel`, `RenameModel`,
 
 ---
 
+## `find_unscoped_queries`
+
+**Which queries read tenant-scoped rows without scoping the query?** The one
+tool here that attacks a bug class generic scanners openly struggle with. See
+[`tenancy.md`](tenancy.md) for the reasoning; this is the interface.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `tenant_root` | `auth.User` | the model that owns data |
+| `search_path` | project path | directory to scan |
+| `max_depth` | `4` | how many relation hops still count as owned |
+| `include_exempt` | `false` | also scan admin, management commands, tests |
+
+Returns `tenant_scoped_models` (each with its ownership path) and `findings`.
+`severity` is `high` one hop from the owner, `medium` further away.
+
+**Candidates, not vulnerabilities.** A filter in a base class, a mixin, a custom
+manager or a `get_queryset()` override is invisible, and `Q()` objects are
+treated as scoped because their contents cannot be read statically.
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

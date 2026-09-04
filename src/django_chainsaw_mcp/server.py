@@ -23,6 +23,7 @@ from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
 from .nplusone import analyse_template as _analyse_template
 from .scan import scan_templates as _scan_templates
+from .tenancy import find_unscoped_queries as _find_unscoped_queries
 
 mcp = MCPServer("django-chainsaw")
 
@@ -129,6 +130,39 @@ def scan_templates(
         template_root=template_root,
         project_root=project_root,
         root_models=root_models,
+    )
+
+
+@mcp.tool()
+def find_unscoped_queries(
+    tenant_root: str = "auth.User",
+    search_path: str | None = None,
+    max_depth: int = 4,
+    include_exempt: bool = False,
+) -> dict[str, Any]:
+    """Find querysets that read tenant-scoped data without scoping the query.
+
+    This is the shape behind most IDOR reports: a view loads an object by
+    primary key and never checks who owns it. Generic analysers struggle
+    because the defect is the absence of a filter, and absence has no syntax.
+    The model graph makes it tractable: it knows Order reaches the tenant root
+    through 'customer', so it can tell that filtering on pk alone is not enough.
+
+    Candidates, not verdicts. A filter in a base class, a mixin, a custom
+    manager or a get_queryset() override is invisible from here.
+
+    Args:
+        tenant_root: the model that owns data, e.g. "auth.User" or "shop.Customer".
+        search_path: directory to scan. Defaults to the project path.
+        max_depth: how many relation hops still count as owned.
+        include_exempt: also scan admin, management commands and tests.
+    """
+    return _guard(
+        _find_unscoped_queries,
+        tenant_root=tenant_root,
+        search_path=search_path,
+        max_depth=max_depth,
+        include_exempt=include_exempt,
     )
 
 

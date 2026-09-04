@@ -31,6 +31,8 @@ expect 0 "migrations without gate"                $BIN migrations
 expect 2 "delete-impact with unknown model"       $BIN delete-impact nope.Nope
 expect 0 "delete-impact shop.Customer"            $BIN delete-impact shop.Customer
 expect 0 "models --short"                         $BIN models --short
+expect 1 "tenancy --fail-on-findings"             $BIN tenancy --tenant-root shop.Customer --fail-on-findings
+expect 0 "tenancy without gate"                   $BIN tenancy --tenant-root shop.Customer
 
 echo
 if [ "$fails" -gt 0 ]; then

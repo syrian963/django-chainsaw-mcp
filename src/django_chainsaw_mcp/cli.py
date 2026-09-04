@@ -24,6 +24,7 @@ from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, Djang
 from .introspect import list_models
 from .migrations import migration_risk
 from .scan import scan_templates
+from .tenancy import find_unscoped_queries
 
 EXIT_OK = 0
 EXIT_FINDINGS = 1
@@ -41,6 +42,39 @@ def _bootstrap(args: argparse.Namespace) -> None:
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, indent=2, default=str))
+
+
+def _cmd_tenancy(args: argparse.Namespace) -> int:
+    report = find_unscoped_queries(
+        tenant_root=args.tenant_root,
+        search_path=args.search_path,
+        max_depth=args.max_depth,
+        include_exempt=args.include_exempt,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"Tenant root: {report['tenant_root']}")
+        print(f"Tenant-scoped models: {len(report['tenant_scoped_models'])}")
+        for label, info in report["tenant_scoped_models"].items():
+            print(f"    {label:<26} owner path: {info['path']}  ({info['depth']} hop(s))")
+        print()
+        print(f"Files scanned: {report['files_scanned']}, "
+              f"queryset chains: {report['queryset_chains_seen']}")
+        print()
+        for finding in report["findings"]:
+            print(f"  {finding['severity']:<7} {finding['file']}:{finding['line']}")
+            print(f"          {finding['code']}")
+            print(f"          {finding['model']} is owned via "
+                  f"'{finding['owner_path']}', filtered on {finding['filter_keys'] or 'nothing'}")
+            print(f"          add: {finding['suggested']}")
+            print()
+        print(f"{report['unscoped_count']} candidate(s), "
+              f"{report['high_severity_count']} at one hop from the owner")
+
+    if args.fail_on_findings and report["unscoped_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
 
 
 def _cmd_deploy_safety(args: argparse.Namespace) -> int:
@@ -194,6 +228,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-high", type=int, metavar="N",
                    help="exit 1 if more than N high severity candidates are found")
     p.set_defaults(func=_cmd_nplusone)
+
+    p = sub.add_parser("tenancy", help="querysets on owned data with no ownership filter")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model",
+                   help="the model that owns data (default: auth.User)")
+    p.add_argument("--search-path", help="directory to scan")
+    p.add_argument("--max-depth", type=int, default=4,
+                   help="how many relation hops still count as owned")
+    p.add_argument("--include-exempt", action="store_true",
+                   help="also scan admin, management commands and tests")
+    p.add_argument("--fail-on-findings", action="store_true", help="exit 1 on any candidate")
+    p.set_defaults(func=_cmd_tenancy)
 
     p = sub.add_parser("migrations", help="rate migrations by production impact")
     p.add_argument("--include-applied", action="store_true")

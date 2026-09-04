@@ -113,6 +113,16 @@ async def main() -> int:
         if "contenttypes" not in safety.get("skipped_third_party_apps", []):
             failures.append("third-party migrations must be skipped over the wire too")
 
+        tenancy = _payload(
+            await client.call_tool("find_unscoped_queries", {"tenant_root": "shop.Customer"})
+        )
+        print("FIND_UNSCOPED_QUERIES candidates=", tenancy.get("unscoped_count"),
+              "high=", tenancy.get("high_severity_count"))
+        if tenancy.get("unscoped_count") != 4:
+            failures.append(f"expected 4 unscoped querysets, got {tenancy.get('unscoped_count')}")
+        if "shop.Product" in (tenancy.get("tenant_scoped_models") or {}):
+            failures.append("Product must not be treated as tenant-scoped")
+
         resources = await client.list_resources()
         uris = [str(r.uri) for r in resources.resources]
         print("RESOURCES:", ", ".join(uris) or "(none)")

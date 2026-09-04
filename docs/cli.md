@@ -51,6 +51,22 @@ Without it the command only reports.
 Use a ratchet rather than zero on an existing project: set N to today's count
 and lower it as you go.
 
+### `tenancy`
+
+```bash
+django-chainsaw tenancy [--tenant-root app.Model] [--search-path DIR] \
+                        [--max-depth N] [--include-exempt] [--fail-on-findings]
+```
+
+Reports querysets on tenant-scoped models that carry no ownership filter.
+`--fail-on-findings` exits `1` on any candidate.
+
+**Pick the right root.** In a B2B product it is usually `Organisation`, not
+`auth.User`, and choosing wrong makes the whole report meaningless.
+
+On an existing codebase this fires immediately, so read the list once and fix or
+accept each entry before turning the gate on.
+
 ### `migrations`
 
 ```bash
@@ -109,6 +125,10 @@ jobs:
       # Reporting only, never fails the build.
       - name: Migration risk
         run: uv run django-chainsaw migrations
+
+      # Turn on --fail-on-findings once the existing list is triaged.
+      - name: Tenant scoping
+        run: uv run django-chainsaw tenancy --tenant-root shop.Customer
 ```
 
 `deploy-safety` needs no database: it reads migration files and source code. If

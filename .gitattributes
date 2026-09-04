@@ -1,0 +1,11 @@
+# Shell scripts must keep LF endings. Editing them from a Windows host through
+# the WSL share once wrote CRLF into exitcheck.sh, and bash answered with
+# "syntax error near unexpected token" on a line that looked perfectly fine.
+*.sh text eol=lf
+
+# Same reasoning, less dramatic failure mode.
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.html text eol=lf

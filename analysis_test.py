@@ -11,6 +11,7 @@ from django_chainsaw_mcp.cascade import delete_impact  # noqa: E402
 from django_chainsaw_mcp.deploy_safety import deploy_safety  # noqa: E402
 from django_chainsaw_mcp.migrations import migration_risk  # noqa: E402
 from django_chainsaw_mcp.nplusone import analyse_template  # noqa: E402
+from django_chainsaw_mcp.tenancy import find_unscoped_queries  # noqa: E402
 
 ROOT = Path(__file__).parent
 failures: list[str] = []
@@ -147,6 +148,41 @@ narrow = deploy_safety(search_path=str(ROOT / "testprojects/demoshop"))
 print("narrowed scan -> blocking:", narrow["blocking_count"], "| clear:", narrow["clear_count"])
 check(narrow["clear_count"] == 1, "with no references in scope the migration must be clear")
 check(narrow["blocking_count"] == 0, "narrowed scan must not report blocking")
+
+print()
+print("=" * 70)
+print("find_unscoped_queries: tenant root shop.Customer")
+print("=" * 70)
+tenancy = find_unscoped_queries(tenant_root="shop.Customer")
+print("tenant-scoped models:", {k: v["path"] for k, v in tenancy["tenant_scoped_models"].items()})
+print("chains seen:", tenancy["queryset_chains_seen"], "| candidates:", tenancy["unscoped_count"])
+for f in tenancy["findings"]:
+    print("  {:<7} {}:{:<4} {:<16} owned via {:<18} keys={}".format(
+        f["severity"], f["file"], f["line"], f["model"], f["owner_path"], f["filter_keys"]))
+
+owned = tenancy["tenant_scoped_models"]
+check(owned.get("shop.Order", {}).get("path") == "customer",
+      f"Order is one hop from Customer, got {owned.get('shop.Order')}")
+check(owned.get("shop.OrderLine", {}).get("path") == "order__customer",
+      f"OrderLine is two hops, got {owned.get('shop.OrderLine')}")
+check("shop.Product" not in owned, "Product does not belong to a Customer and must not be scoped")
+check("shop.Category" not in owned, "Category does not belong to a Customer")
+
+flagged = {(f["file"], f["line"]) for f in tenancy["findings"]}
+lines = sorted(line for _, line in flagged)
+
+check(tenancy["unscoped_count"] == 4,
+      f"expected exactly the 4 unscoped views, got {tenancy['unscoped_count']} at lines {lines}")
+check(len(flagged) == len(tenancy["findings"]),
+      "each queryset must be reported once; ast.walk visits inner and outer calls")
+check(tenancy["high_severity_count"] == 2,
+      f"two of them are one hop from the owner, got {tenancy['high_severity_count']}")
+
+scoped_lines = {34, 38, 42, 47}
+check(not (scoped_lines & {line for _, line in flagged}),
+      f"the correctly scoped views must not be flagged, got {sorted(flagged)}")
+check(all(f["model"] != "shop.Product" for f in tenancy["findings"]),
+      "Product.objects.all() is legitimate and must not be flagged")
 
 print()
 print("=" * 70)

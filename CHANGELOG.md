@@ -15,6 +15,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   template context from class-based views that declare `template_name` with
   `model` or `queryset`. `find_n_plus_one` needs a context map typed by hand,
   which is fine from an assistant and useless in CI.
+- **`find_unscoped_queries`**: reports querysets that read tenant-scoped rows
+  without an ownership filter, the shape behind most IDOR reports. Generic
+  static analysers struggle with this class because the defect is the absence of
+  a filter and absence has no syntax; the existing answers are runtime SQL
+  inspection or PostgreSQL row-level security. The model graph makes it
+  checkable: it knows `Order` reaches the tenant root through `customer`, so
+  filtering on `pk` alone is visibly not enough. Models with no path to the
+  owner are never reported.
 - **`deploy_safety`**: cross-references pending destructive migrations against
   the code that still uses them, and reports `blocking` with file and line
   numbers or `clear`. Python is parsed with `ast`; templates use patterns.
@@ -70,6 +78,14 @@ of tooling actually has.
 - **The package imported `server` eagerly**, which made
   `python -m django_chainsaw_mcp.server` import the module twice and emit a
   `RuntimeWarning`. `main` is resolved lazily through `__getattr__`.
+
+- **Duplicate findings from chained querysets.** `ast.walk` visits every `Call`
+  in a chain, so `Order.objects.filter(...).first()` unwound twice and was
+  reported twice. Findings are deduplicated per file, line and model, keeping
+  the outermost chain.
+- **CRLF line endings in the shell scripts.** Editing them from a Windows host
+  through the WSL share wrote `\r\n`, and bash failed with a syntax error on a
+  line that looked correct. A `.gitattributes` now pins `eol=lf`.
 
 ### Changed
 
