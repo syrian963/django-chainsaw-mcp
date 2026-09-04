@@ -1,0 +1,24 @@
+[project]
+name = "django-chainsaw-mcp"
+version = "0.1.0"
+description = "MCP server for read-only introspection of Django projects: models, relations, migrations."
+readme = "README.md"
+authors = [
+    { name = "Mohammad Alsakka", email = "mnouralsakka@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=2.1.1",
+]
+
+[project.scripts]
+django-chainsaw-mcp = "django_chainsaw_mcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "django>=6.1.1",
+]
