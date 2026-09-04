@@ -28,6 +28,7 @@ from .bypass import bypassed_effects
 from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
 from .migrations import migration_risk
+from .money import money_precision
 from .on_commit import escaping_side_effects
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
@@ -211,6 +212,18 @@ def _from_open(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _from_money(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _finding(
+            "money", f["severity"], f["kind"].replace("_", " "),
+            f.get("target") or f"{f.get('file')}:{f.get('line')}",
+            f["detail"], f["fix"],
+        )
+        for f in report.get("findings", [])
+        if f["severity"] != "low"
+    ]
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for entry in report.get("migrations", []):
@@ -240,6 +253,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "on-commit": (escaping_side_effects, lambda o: {}, _from_on_commit),
     "bypass": (bypassed_effects, lambda o: {}, _from_bypass),
     "races": (race_conditions, lambda o: {}, _from_races),
+    "money": (money_precision, lambda o: {}, _from_money),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
 }

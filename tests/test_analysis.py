@@ -967,3 +967,65 @@ def test_a_prefetch_object_no_longer_marks_the_queryset_dynamic():
     optimises = _endpoints()["PrefetchObjectOrderViewSet"]["queryset_optimises"]
     assert optimises["dynamic"] is False
     assert "reminders" in optimises["prefetch_related"]
+
+
+def _money():
+    from django_chainsaw_mcp.money import money_precision
+
+    report = money_precision()
+    return {f["kind"]: f for f in report["findings"]}, report
+
+
+def test_an_inexact_float_literal_is_high_and_an_exact_one_is_not():
+    # This is the whole difference between a useful check and 50 false
+    # alarms: Decimal(0.5) loses nothing, Decimal(0.19) is already wrong.
+    found, _ = _money()
+    assert found["decimal_from_inexact_float"]["severity"] == "high"
+    assert found["decimal_from_exact_float"]["severity"] == "low"
+    assert "0.19" in found["decimal_from_inexact_float"]["detail"]
+
+
+def test_float_on_a_decimal_column_is_reported_and_a_non_money_field_is_not():
+    found, report = _money()
+    assert found["float_of_decimal"]["field"] == "price"
+    # `quantity` is not a DecimalField anywhere, so float(order.quantity) is
+    # left alone rather than guessed at.
+    assert "quantity" not in report["decimal_field_names"]
+    assert all(f.get("field") != "quantity" for f in report["findings"])
+
+
+def test_round_on_money_is_medium_and_names_the_rounding_rule():
+    found, _ = _money()
+    entry = found["round_of_decimal"]
+    assert entry["severity"] == "medium"
+    assert "0.13" in entry["detail"]
+    assert "quantize" in entry["fix"]
+
+
+def test_a_float_column_holding_money_is_a_model_level_finding():
+    found, _ = _money()
+    entry = found["float_column_for_money"]
+    assert entry["target"] == "shop.Invoice.legacy_total_fee"
+    assert entry["severity"] == "high"
+
+
+def test_correctly_written_money_code_is_silent():
+    # correct_gross() multiplies Decimals and quantizes with an explicit
+    # rounding mode. If that is ever reported the check is noise.
+    _, report = _money()
+    lines = {f.get("line") for f in report["findings"] if f.get("file", "").endswith("pricing.py")}
+    import ast
+    import io
+    from pathlib import Path
+
+    from django_chainsaw_mcp.django_env import ensure_django
+
+    root = Path(ensure_django().project_path)
+    tree = ast.parse(io.open(root / "shop" / "pricing.py", encoding="utf-8").read())
+    spans = {
+        n.name: (n.lineno, n.end_lineno)
+        for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+    }
+    for name in ("correct_gross", "not_money"):
+        start, end = spans[name]
+        assert not [ln for ln in lines if start <= ln <= end], name

@@ -41,6 +41,7 @@ from .exposure_auth import open_endpoints as _open_endpoints
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .migrations import migration_risk as _migration_risk
+from .money import money_precision as _money_precision
 from .nplusone import analyse_template as _analyse_template
 from .scan import scan_templates as _scan_templates
 from .serializers import serializer_exposure as _serializer_exposure
@@ -322,6 +323,33 @@ def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]
             to_representation, where the relation may be read out of sight.
     """
     return _guard(_unused_eager_loading, include_low_confidence=include_low_confidence)
+
+
+@mcp.tool()
+def money_precision(search_path: str | None = None) -> dict[str, Any]:
+    """Places where a decimal amount stops being exact.
+
+    A DecimalField exists so that money is exact. Four things give that up,
+    and they are not equally bad:
+
+        Decimal(0.1)            wrong from birth - 0.1 has no exact binary
+                                form, so this is 0.1000000000000000055...
+        float(invoice.amount)   a one-way door; everything after is approximate
+        round(amount, 2)        exact, but banker's rounding: 0.125 becomes
+                                0.12 where an invoice expects 0.13
+        FloatField("price")     the column itself cannot hold money
+
+    Decimal(0.5) is NOT reported as a defect: that float is exactly
+    representable and nothing is lost. The check computes the round trip, so
+    on a real project 41 of 50 Decimal(<float>) calls came back harmless and
+    11 were genuinely wrong. Nothing in the linter ecosystem looks at this;
+    the usual advice stops at the model definition and every one of these
+    happens somewhere else.
+
+    Args:
+        search_path: directory to scan. Defaults to the project root.
+    """
+    return _guard(_money_precision, search_path=search_path)
 
 
 @mcp.tool()

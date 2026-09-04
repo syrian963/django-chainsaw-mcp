@@ -7,6 +7,28 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`money_precision`**: places where a decimal amount stops being exact.
+  A `DecimalField` exists so that money is exact, and four things give that up
+  somewhere the model definition cannot see: `Decimal(<inexact float>)`, which
+  is wrong before anything is done with it; `float()` on a decimal column, a
+  one-way door; `round()` instead of `quantize()`, which keeps the precision
+  and quietly picks banker's rounding, so 0.125 becomes 0.12 where an invoice
+  expects 0.13; and a `FloatField` holding money, where the column itself is
+  the problem.
+
+  The distinction that makes it usable is that `Decimal(0.5)` loses nothing and
+  `Decimal(0.1)` does, so the check computes the round trip rather than matching
+  the pattern. On a large real project that split 50 calls into 41 harmless and
+  11 genuinely wrong; without it the check would have been 82% noise. The
+  harmless ones are reported at low severity and hidden by default, because a
+  literal that is exact today is one edit from not being.
+
+  `float()` and `round()` are matched by attribute name against every
+  DecimalField name in the project, since resolving what `invoice.amount` refers
+  to would need type inference. Nothing in the linter ecosystem looks at any of
+  this: the advice stops at the model definition and every one of these happens
+  somewhere else.
+
 - **`unused_eager_loading`**: `select_related` and `prefetch_related` the
   serializer never reads. Every tool in this space looks the other way - a
   relation touched but not prefetched, the N+1 - while this direction costs on

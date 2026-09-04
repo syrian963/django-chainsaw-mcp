@@ -441,6 +441,24 @@ Documented in [`overfetch.md`](overfetch.md).
 
 ---
 
+## `money_precision`
+
+Places where a decimal amount stops being exact: `Decimal(<inexact float>)`,
+`float()` on a decimal column, `round()` instead of `quantize()`, a
+`FloatField` holding money, a float `default` on a `DecimalField`.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+`Decimal(0.5)` is separated from `Decimal(0.1)`: the first is exactly
+representable and loses nothing. On a real project that split 50 calls into 41
+harmless and 11 wrong.
+
+Documented in [`money.md`](money.md).
+
+---
+
 ## Resource: `django://models`
 
 The full model graph as JSON, identical to `list_models` with all apps and

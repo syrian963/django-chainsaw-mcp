@@ -37,6 +37,7 @@ from .bypass import bypassed_effects
 from .concurrency import race_conditions
 from .deploy_safety import deploy_safety
 from .exposure_auth import open_endpoints
+from .money import money_precision
 from .on_commit import escaping_side_effects
 from .overfetch import unused_eager_loading
 from .endpoint_cost import endpoint_cost
@@ -488,6 +489,40 @@ def _cmd_overfetch(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["high_confidence_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_money(args: argparse.Namespace) -> int:
+    report = money_precision(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"No decimal amount loses exactness in {report['files_scanned']} file(s).")
+        else:
+            print(f"{report['finding_count']} place(s) where a decimal amount stops being exact "
+                  f"({report['high_severity_count']} high)")
+            print()
+            for finding in report["findings"]:
+                if finding["severity"] == "low" and not args.include_low:
+                    continue
+                where = finding.get("target") or f"{finding.get('file')}:{finding.get('line')}"
+                print(f"  {finding['severity'].upper():<6} {where}  [{finding['kind']}]")
+                if finding.get("code"):
+                    print(f"         {finding['code']}")
+                print(f"         {finding['detail']}")
+                print(f"         fix: {finding['fix']}")
+                print()
+            low = sum(1 for f in report["findings"] if f["severity"] == "low")
+            if low and not args.include_low:
+                print(f"{low} low-severity finding(s) hidden; --include-low shows them. "
+                      "Those are floats that happen to be exactly representable, so "
+                      "nothing is lost today.")
+                print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["high_severity_count"]:
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1266,6 +1301,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any high-confidence unused eager load")
     p.set_defaults(func=_cmd_overfetch)
+
+    p = sub.add_parser("money", help="decimal amounts that stop being exact")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--include-low", action="store_true",
+                   help="also show floats that happen to be exactly representable")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any high-severity precision loss")
+    p.set_defaults(func=_cmd_money)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

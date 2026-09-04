@@ -59,6 +59,9 @@ class Invoice(models.Model):
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="invoice")
     number = models.CharField(max_length=32, unique=True)
     internal_note = models.TextField(blank=True, default="")
+    amount_due = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    # A FloatField holding money: the column itself cannot be exact.
+    legacy_total_fee = models.FloatField(default=0.0)
 
 
 class Reminder(models.Model):

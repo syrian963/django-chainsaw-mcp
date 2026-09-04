@@ -194,6 +194,17 @@ Relations the queryset loads and the serializer never reads. An unused
 is low (a JOIN per row). `--fail-on-findings` exits `1` on any high-confidence
 one.
 
+### `money`
+
+```bash
+django-chainsaw money [--search-path DIR] [--include-low] [--fail-on-findings]
+```
+
+Decimal amounts that stop being exact. Low findings — floats that happen to be
+exactly representable — are hidden unless `--include-low`. `--fail-on-findings`
+exits `1` on any high. Also in the aggregate `check` as `money`, where low
+findings are excluded.
+
 ### `indexes`
 
 ```bash
