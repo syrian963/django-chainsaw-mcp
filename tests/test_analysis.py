@@ -1610,3 +1610,33 @@ def test_a_decorator_written_with_arguments_is_still_recorded():
         fn for name, fn in graph.functions.items() if name.endswith("tasks.retryable")
     )
     assert any(d.endswith("shared_task") or d.endswith("task") for d in bound.decorators)
+
+
+def test_a_serializer_finding_points_at_a_path_not_a_bare_filename():
+    # "serializers.py:16" is ambiguous the moment a project has two of them,
+    # which every project of any size does, and no editor can open it.
+    from django_chainsaw_mcp.serializer_nplusone import serializer_nplusone
+
+    located = [f["location"] for f in serializer_nplusone()["findings"] if f["location"]]
+    assert located
+    assert all("/" in where for where in located), located[:3]
+
+
+def test_a_serializer_n_plus_one_is_attributed_to_the_views_that_declare_it():
+    # A serializer field is inside no function, so the backward walk has
+    # nothing to start from. DRF knows which view declares the serializer,
+    # which is the same question asked about a class instead.
+    report = _impact()
+    served = [
+        entry for entry in report["entry_points"]
+        if any(f["check"] == "n+1-serializer" for f in entry["findings"])
+    ]
+    assert served, "no serializer finding reached a view"
+    assert any("ProductViewSet" in entry["entry"] for entry in served)
+
+
+def test_a_serializer_no_view_declares_stays_unattributed():
+    report = _impact()
+    # It is still in the contract and still a finding. It is simply not on the
+    # path of any request this can see, and saying otherwise would be a guess.
+    assert any(f["check"] == "n+1-serializer" for f in report["unattributed"])

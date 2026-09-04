@@ -7,6 +7,15 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Serializer findings are attributed through the view that declares them.**
+  An N+1 in a serializer is a field on a class, with no enclosing function for
+  the backward walk to start from, so every one of them landed in
+  `unattributed` - by a wide margin the largest group there. DRF records which
+  view declares which serializer, so the class holding the line is looked up
+  there instead. A ViewSet that declares `serializer_class` and overrides
+  nothing is named as the entry point itself, since there is no method to point
+  at. A serializer no view declares stays unattributed, because it is.
+
 - **`request_impact`: which findings does a request actually hit?** Every other
   check answers "where is this defect". On a large codebase that is a few
   hundred correct entries sorted by severity, and nobody knows where to start,
@@ -53,6 +62,11 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   project every check still runs and nothing is skipped.
 
 ### Fixed
+
+- **A serializer finding pointed at a bare filename.** `serializers.py:16` is
+  ambiguous the moment a project has two of them, which every project of any
+  size does, and no editor or code-scanning UI can open it. Locations are now
+  relative to the project root.
 
 - **Decorators written with arguments were recorded as nothing.** `_dotted`
   returns "" for a `Call` node, so the call graph saw `@shared_task` but not

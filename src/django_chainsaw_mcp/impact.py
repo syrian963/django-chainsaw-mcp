@@ -208,6 +208,27 @@ def _reaching(
     return hits
 
 
+def _serializer_map(root: Path) -> dict[str, list[str]]:
+    """Serializer class -> the views that declare it, or {} if DRF is absent.
+
+    A serializer field is not inside any function, so the backward walk has
+    nothing to start from and every N+1 in a serializer lands in
+    `unattributed`. It is served by a view, though, and DRF records which -
+    which is the same question this file asks about a function, asked about a
+    class instead.
+    """
+    try:
+        from .discovery import serializers_used_by_views
+
+        return serializers_used_by_views(root)
+    except Exception:  # noqa: BLE001 - no DRF, or no settings; not an error here
+        return {}
+
+
+def _entries_on(entries: dict[str, dict[str, Any]], view: str) -> list[str]:
+    return [q for q in entries if q.startswith(f"{view}.")]
+
+
 def _location(finding: dict[str, Any]) -> tuple[str, int] | None:
     """file and line, from either the structured fields or `location`."""
     if finding.get("file") and finding.get("line"):
@@ -245,8 +266,10 @@ def impact(
     entries = entry_points(graph)
     reverse = _callers(graph)
     index = _by_file(graph)
+    serving = _serializer_map(root)
 
     by_entry: dict[str, dict[str, Any]] = {}
+    declarative: dict[str, dict[str, Any]] = {}
     unattributed: list[dict[str, Any]] = []
     no_location: list[dict[str, Any]] = []
     holders: dict[tuple[str, int], str | None] = {}
@@ -261,7 +284,39 @@ def impact(
             holders[where] = _containing(index, relative, line)
         holder = holders[where]
         if holder is None:
-            unattributed.append({**finding, "reason": "no function contains this line"})
+            hits = {}
+            owner = graph.class_at(relative, line)
+            for view in serving.get(owner or "", ()):
+                for entry in _entries_on(entries, view):
+                    hits[entry] = [entry, owner]
+                if not _entries_on(entries, view):
+                    # A ViewSet that declares `serializer_class` and overrides
+                    # nothing is still an endpoint. There is no function to
+                    # point at, so the class is the honest answer.
+                    declarative.setdefault(view, {
+                        "kind": "http", "label": f"{view} (declares the serializer)",
+                        "file": "", "line": 0, "entry": view, "findings": [],
+                    })
+                    hits[view] = [view, owner]
+            if not hits:
+                unattributed.append(
+                    {**finding, "reason": "no function contains this line"}
+                )
+                continue
+            for entry, path in hits.items():
+                slot = by_entry.get(entry) or declarative.get(entry)
+                if slot is None:
+                    slot = by_entry.setdefault(
+                        entry, {**entries[entry], "entry": entry, "findings": []}
+                    )
+                by_entry.setdefault(entry, slot)
+                slot["findings"].append({
+                    "check": finding.get("check"),
+                    "severity": finding.get("severity"),
+                    "title": finding.get("title"),
+                    "location": f"{relative}:{line}",
+                    "through": path,
+                })
             continue
 
         hits = _reaching(reverse, holder, entries, max_depth)
@@ -302,6 +357,7 @@ def impact(
 
     return {
         "entry_points_found": len(entries),
+        "serializers_attributed_to_views": len(serving),
         "entry_points_by_kind": dict(sorted(kinds.items())),
         "entry_points_with_findings": len(ranked),
         "entry_points": ranked,

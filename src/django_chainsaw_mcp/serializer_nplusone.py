@@ -34,13 +34,27 @@ from .discovery import load_serializer_modules
 from .django_env import ensure_django
 
 
-def _location(cls: Any) -> str | None:
+def _location(cls: Any, root: Path | None = None) -> str | None:
+    """Where the class is defined, relative to the project.
+
+    The file name alone is ambiguous the moment a project has two
+    `serializers.py`, which every project of any size does, and a bare name is
+    not something an editor or a code-scanning UI can open.
+    """
     try:
         source_file = inspect.getsourcefile(cls)
         _, line = inspect.getsourcelines(cls)
     except (OSError, TypeError):
         return None
-    return f"{Path(source_file).name}:{line}" if source_file else None
+    if not source_file:
+        return None
+    path = Path(source_file)
+    if root is not None:
+        try:
+            path = path.relative_to(root)
+        except ValueError:
+            pass
+    return f"{path}:{line}"
 
 
 def _relation_for(model: Any, name: str) -> dict[str, Any] | None:
@@ -65,7 +79,9 @@ def _relation_for(model: Any, name: str) -> dict[str, Any] | None:
     }
 
 
-def _walk_serializer(cls: Any, depth: int, max_depth: int, seen: set[int]) -> list[dict[str, Any]]:
+def _walk_serializer(
+    cls: Any, depth: int, max_depth: int, seen: set[int], root: Path | None = None,
+) -> list[dict[str, Any]]:
     """Relation-crossing fields on one serializer, following nested ones."""
     from rest_framework import serializers as drf
 
@@ -99,7 +115,7 @@ def _walk_serializer(cls: Any, depth: int, max_depth: int, seen: set[int]) -> li
             "field": name,
             "source": source,
             "depth": depth,
-            "location": _location(cls),
+            "location": _location(cls, root),
         }
 
         # A method field can do anything, including a query per row, and there
@@ -145,7 +161,7 @@ def _walk_serializer(cls: Any, depth: int, max_depth: int, seen: set[int]) -> li
         )
 
         if is_nested_serializer and getattr(nested_class, "Meta", None) is not None:
-            for child in _walk_serializer(nested_class, depth + 1, max_depth, seen):
+            for child in _walk_serializer(nested_class, depth + 1, max_depth, seen, root):
                 if "lookup" in child:
                     child["lookup"] = f"{lookup}__{child['lookup']}"
                     child["suggested"] = (
@@ -201,7 +217,7 @@ def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
 
     for cls in roots:
         root_name = f"{cls.__module__}.{cls.__qualname__}"
-        for entry in _walk_serializer(cls, 0, max_depth, set()):
+        for entry in _walk_serializer(cls, 0, max_depth, set(), config.project_path):
             entry.setdefault("root_serializer", root_name)
             if entry.get("unreadable"):
                 unreadable.append(entry)

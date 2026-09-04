@@ -756,6 +756,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
             for finding in entry["findings"][:args.per_entry]:
                 print(f"            {finding['severity']:<9} {finding['check']:<16} "
                       f"{finding['location']}")
+                print(f"                      {finding['title']}")
                 if len(finding["through"]) > 1:
                     hops = " -> ".join(q.rsplit(".", 1)[-1] for q in finding["through"])
                     print(f"                      via {hops}")

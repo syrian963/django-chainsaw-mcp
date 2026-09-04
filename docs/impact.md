@@ -50,6 +50,32 @@ The list is closed rather than "every method on a view class". Making a private
 helper an entry point would stop the backward walk at the helper and hide the
 action that actually serves the request.
 
+## A serializer is not inside a function
+
+An N+1 in a serializer is a field on a class. There is no enclosing function,
+so the backward walk has nothing to start from, and on a real project that put
+every single serializer finding into `unattributed` - the largest group there
+by a wide margin.
+
+A serializer is served by a view, though, and DRF records which. So when no
+function holds the line, the class holding it is looked up in the
+serializer-to-view map and attributed to the views that declare it:
+
+```
+  HIGH          6  shop.viewsets.ProductViewSet (declares the serializer)
+            high      n+1-serializer   shop/api_serializers.py:16
+                      ProductSerializer.category crosses a relation
+                      via ProductViewSet -> ProductSerializer
+```
+
+A ViewSet that declares `serializer_class` and overrides nothing is still an
+endpoint. There is no method to point at, so the class is named instead, which
+is the honest answer rather than a missing one.
+
+A serializer no view declares stays unattributed. It is still in the contract
+and still a finding; it is simply not on the path of any request this can see,
+and `get_serializer_class` can return anything at runtime.
+
 ## Backwards, not forwards
 
 Reachability from every entry point forwards gives the same answer and costs a
@@ -68,9 +94,10 @@ point this can see reaches the finding**, and the two ordinary reasons are:
 - A call the graph could not resolve — a callable passed as an argument, a
   method looked up by name, a `getattr`.
 
-Findings with no file and line at all — a migration, a serializer class, a
-template — are counted separately in `without_a_location_count`, because there
-is nothing to attribute them from.
+Findings with no file and line at all — a migration, a template, a model-level
+verdict — are counted separately in `without_a_location_count`, because there
+is nothing to attribute them from. A serializer used to be in that list and no
+longer is.
 
 ## Usage
 
