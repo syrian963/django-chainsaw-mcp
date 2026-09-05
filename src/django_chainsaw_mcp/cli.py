@@ -51,6 +51,7 @@ from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, Djang
 from .indexes import missing_indexes
 from .introspect import list_models
 from .choices import choice_typos
+from .dangling import dangling_references
 from .impact import impact
 from .loop_queries import queries_in_loops
 from .migrations import migration_risk
@@ -729,6 +730,37 @@ def _cmd_celery(args: argparse.Namespace) -> int:
             print(f"         {f['code']}")
             print(f"         {f['why']}")
             print(f"         fix: {f['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_dangling(args: argparse.Namespace) -> int:
+    report = dangling_references(
+        search_path=args.search_path,
+        include_templates=not args.skip_templates,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['url_names_registered']} URL name(s) across "
+              f"{report['urlconfs_read']} URLconf(s); "
+              f"{report['url_names_checked']} reference(s) and "
+              f"{report['template_names_checked']} template name(s) checked.")
+        print()
+        if not report["finding_count"]:
+            print("Every name resolves.")
+        for group in report["by_name"]:
+            print(f"  {group['severity'].upper():<9} {group['kind']:<9} "
+                  f"{group['name']!r}  ({group['uses']} use(s))")
+            for where in group["files"]:
+                print(f"            {where}")
+            if group["uses"] > len(group["files"]):
+                print(f"            ... and {group['uses'] - len(group['files'])} more")
+            print(f"            {group['why']}")
             print()
         print(report["note"])
 
@@ -1840,6 +1872,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any task given the wrong thing")
     p.set_defaults(func=_cmd_celery)
+
+    p = sub.add_parser("dangling",
+                       help="URL names and template names nothing will resolve")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--skip-templates", action="store_true",
+                   help="do not read the templates themselves")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any name that will not resolve")
+    p.set_defaults(func=_cmd_dangling)
 
     p = sub.add_parser("choices",
                        help="literals a field's choices will never match")

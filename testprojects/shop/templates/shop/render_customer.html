@@ -1,0 +1,8 @@
+{# The template `render_views.customer_detail` renders. It was referenced and
+   never created, which the dangling-reference check found. #}
+<h1>{{ customer.email }}</h1>
+<ul>
+  {% for order in customer.orders.all %}
+    <li>{{ order.placed_at }} - {{ order.status }}</li>
+  {% endfor %}
+</ul>

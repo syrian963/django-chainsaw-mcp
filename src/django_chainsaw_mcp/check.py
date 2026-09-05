@@ -30,6 +30,7 @@ from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .indexes import missing_indexes
 from .bypass import bypassed_effects
 from .choices import choice_typos
+from .dangling import dangling_references
 from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
 from .celery_tasks import celery_arguments
@@ -327,6 +328,18 @@ def _from_choices(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_dangling(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _finding(
+            "dangling", f["severity"],
+            (f"no URL pattern is named {f['name']!r}" if f["kind"] == "url"
+             else f"no template named {f['name']!r} exists"),
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+
+
 def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     for bucket in ("per_row", "loop_invariant", "writes_in_loops"):
@@ -379,6 +392,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "celery": (celery_arguments, lambda o: {}, _from_celery),
     "loops": (queries_in_loops, lambda o: {}, _from_loops),
     "choices": (choice_typos, lambda o: {}, _from_choices),
+    "dangling": (dangling_references, lambda o: {}, _from_dangling),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
     "async": (blocking_in_async, lambda o: {}, _from_async),
@@ -405,6 +419,7 @@ _REQUIRES: dict[str, str] = {
     "celery": "django",
     "loops": "django",
     "choices": "django",
+    "dangling": "django",
     "open": "django",
     "migrations": "django",
     "async": "any",

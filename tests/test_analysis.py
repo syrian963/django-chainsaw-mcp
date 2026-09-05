@@ -1870,3 +1870,99 @@ def test_a_string_literal_against_an_integer_field_is_not_a_typo():
         str(f["value"]) not in {str(a) for a in f["allowed"]}
         for f in choice_typos()["findings"]
     )
+
+
+# --- dangling: names the framework has to resolve --------------------------
+
+
+def _dangling():
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    report = dangling_references()
+    return report, {(f["file"], f["name"]) for f in report["findings"]}
+
+
+def _links(name):
+    import ast
+
+    from django_chainsaw_mcp.project import project_root
+
+    source = (project_root() / "shop" / "links.py").read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return {
+                line for line in
+                (getattr(n, "lineno", None) for n in ast.walk(node))
+                if line is not None
+            }
+    raise AssertionError(f"no fixture named {name}")
+
+
+def _lines_reported(report, suffix):
+    return {f["line"] for f in report["findings"] if f["file"].endswith(suffix)}
+
+
+def test_a_misspelled_url_name_is_found():
+    report, _ = _dangling()
+    assert _lines_reported(report, "links.py") & _links("wrong_reverse")
+
+
+def test_reverse_lazy_and_redirect_are_checked_too():
+    report, _ = _dangling()
+    reported = _lines_reported(report, "links.py")
+    assert reported & _links("wrong_reverse_lazy")
+    assert reported & _links("wrong_redirect")
+
+
+def test_a_correct_url_name_is_silent():
+    report, _ = _dangling()
+    reported = _lines_reported(report, "links.py")
+    for name in ("correct_reverse", "correct_redirect"):
+        assert not (reported & _links(name)), name
+
+
+def test_redirect_to_a_path_or_a_url_is_left_alone():
+    # redirect() also takes a path and a model instance, so a literal that
+    # cannot be a name is not one.
+    report, _ = _dangling()
+    reported = _lines_reported(report, "links.py")
+    for name in ("redirect_to_a_path_is_left_alone",
+                 "redirect_to_an_absolute_url_is_left_alone"):
+        assert not (reported & _links(name)), name
+
+
+def test_a_missing_template_is_found_and_an_existing_one_is_not():
+    report, _ = _dangling()
+    reported = _lines_reported(report, "links.py")
+    assert reported & _links("wrong_template")
+    assert not (reported & _links("correct_template"))
+
+
+def test_a_template_name_built_at_runtime_is_silent():
+    report, _ = _dangling()
+    assert not (_lines_reported(report, "links.py") & _links("a_name_built_at_runtime"))
+
+
+def test_url_and_include_tags_inside_a_template_are_checked():
+    report, _ = _dangling()
+    from_templates = {
+        f["name"] for f in report["findings"] if f["file"].endswith(".html")
+    }
+    assert "confirm-ordr" in from_templates
+    assert "shop/_order_rows.html" in from_templates
+
+
+def test_every_urlconf_is_read_not_only_the_root():
+    # A project serving two sites picks the URLconf per request, and checking
+    # against ROOT_URLCONF alone reported 629 working reverse() calls as
+    # broken on the first real project this saw.
+    report, _ = _dangling()
+    assert report["urlconfs_read"] >= 2
+
+
+def test_findings_are_grouped_by_name():
+    # One missing name used in thirty-five places is one problem.
+    report, _ = _dangling()
+    grouped = {g["name"]: g for g in report["by_name"]}
+    assert grouped["daily-reprot"]["uses"] == 2
+    assert len(grouped["daily-reprot"]["files"]) == 2

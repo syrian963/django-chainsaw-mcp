@@ -281,6 +281,15 @@ django-chainsaw celery [--search-path DIR] [--fail-on-findings]
 Model instances handed to Celery tasks, and dispatches whose argument count
 cannot match the task. Also in the aggregate `check` as `celery`.
 
+### `dangling`
+
+```bash
+django-chainsaw dangling [--search-path DIR] [--skip-templates] [--fail-on-findings]
+```
+
+URL names and template names nothing will resolve, grouped by name. Also in the
+aggregate `check` as `dangling`. Full page: [dangling.md](dangling.md).
+
 ### `choices`
 
 ```bash

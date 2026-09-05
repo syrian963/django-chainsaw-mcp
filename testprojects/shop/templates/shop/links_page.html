@@ -1,0 +1,7 @@
+{% extends "shop/order_list.html" %}
+{# The correct spelling, resolved from the URLconf. #}
+<a href="{% url 'confirm-order' order.pk %}">confirm</a>
+{# One letter out. Takes the whole page down while rendering, not one link. #}
+<a href="{% url 'confirm-ordr' order.pk %}">confirm</a>
+{% include "shop/_order_row.html" %}
+{% include "shop/_order_rows.html" %}

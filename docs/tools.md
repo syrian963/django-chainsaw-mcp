@@ -595,6 +595,20 @@ Documented in [`celery.md`](celery.md).
 
 ---
 
+## `dangling_references`
+
+URL names and template names that nothing will resolve. `redirect("order-detial")`
+imports cleanly, passes every test that does not take that branch, and raises
+`NoReverseMatch` for the first person who does.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_templates` | `true` | also read `{% url %}`, `{% include %}`, `{% extends %}` |
+
+Every URLconf in the project is read, not only `ROOT_URLCONF`. `by_name` groups
+the findings. Full page: [dangling.md](dangling.md).
+
 ## `choice_typos`
 
 Literals compared against a field whose `choices` do not contain them.

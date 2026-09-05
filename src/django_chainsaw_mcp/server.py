@@ -44,6 +44,7 @@ from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
 from .choices import choice_typos as _choice_typos
+from .dangling import dangling_references as _dangling_references
 from .impact import impact as _impact
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
@@ -644,6 +645,43 @@ def choice_typos(
     """
     return _guard(
         _choice_typos, search_path=search_path, include_tests=include_tests
+    )
+
+
+@mcp.tool()
+def dangling_references(
+    search_path: str | None = None,
+    include_templates: bool = True,
+) -> dict[str, Any]:
+    """URL names and template names that nothing will resolve.
+
+        return redirect("order-detial")
+        return render(request, "shop/order_detial.html", context)
+        {% url 'shop:order-detial' order.pk %}
+
+    Each of these is resolved while serving a request and checked by nothing
+    before then. Rename a URL pattern or move a template and they keep
+    importing, keep passing every test that does not walk that branch, and
+    raise NoReverseMatch or TemplateDoesNotExist the first time a real person
+    opens the page - on the path nobody was watching.
+
+    Both sides use the project's own machinery: names come from every URLconf
+    in the project walked through each include(), so namespaces are real and a
+    second URLconf served by host is not mistaken for a missing one; templates
+    go through get_template(), so the project's loaders decide.
+
+    `by_name` groups the findings, because one missing name used in
+    thirty-five places is one problem.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        include_templates: also read `{% url %}`, `{% include %}` and
+            `{% extends %}` out of the templates.
+    """
+    return _guard(
+        _dangling_references,
+        search_path=search_path,
+        include_templates=include_templates,
     )
 
 

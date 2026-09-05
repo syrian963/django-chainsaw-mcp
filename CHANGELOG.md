@@ -7,6 +7,23 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`dangling_references`: names the framework has to resolve, checked ahead of
+  the request.** `redirect("order-detial")`, `render(request,
+  "shop/order_detial.html")` and `{% url 'shop:order-detial' %}` are resolved
+  while serving a request and checked by nothing before then: they import
+  cleanly, satisfy a type checker, pass every test that does not walk that
+  branch, and raise `NoReverseMatch` or `TemplateDoesNotExist` for the first
+  person who does - on the error page, the rare redirect, the export somebody
+  runs at month end. URL names come from every URLconf in the project, walked
+  through each `include()` so namespaces are real; template names go through
+  `get_template()`, so the project's own loaders decide. A template that exists
+  and will not compile is not reported, because the question is whether it is
+  there.
+- **`by_name` groups the output.** One missing name used in thirty-five places
+  is one problem, and thirty-five lines hide that.
+- New CLI subcommand `dangling`, MCP tool `dangling_references`, and `dangling`
+  in the aggregate check.
+
 - **`choice_typos`: literals a field's `choices` will never match.**
   `Order.objects.filter(status="cancelled")` where the choices spell it with
   one L is valid Python, valid SQL, returns zero rows, raises nothing and is
