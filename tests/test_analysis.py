@@ -2103,3 +2103,84 @@ def test_the_report_says_how_much_of_the_source_it_could_resolve():
     report, _ = _aggregates()
     assert report["annotate_calls_in_source"] > 0
     assert report["annotate_calls_in_source"] >= report["annotate_calls_seen"]
+
+
+# --- querysets: which model is this chain about ----------------------------
+
+
+def _resolve(source, models={"Booking"}):
+    """Resolve every filter() in a snippet to its model."""
+    import ast
+
+    from django_chainsaw_mcp import querysets
+
+    tree = ast.parse(source)
+    context = querysets.scopes(tree, models)
+    out = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "filter"):
+            names, class_models = querysets.context_for(context, node)
+            unwound = querysets.unwind(node, models, names, class_models)
+            out[ast.unparse(node)] = unwound[0] if unwound else None
+    return out
+
+
+def test_a_custom_manager_resolves_like_objects_does():
+    # A project with Order.available is not a project to go quiet on.
+    found = _resolve("Booking.available.filter(x=1)")
+    assert found["Booking.available.filter(x=1)"] == "Booking"
+
+
+def test_a_local_variable_resolves_to_its_model():
+    found = _resolve("def f():\n    qs = Booking.objects.all()\n    qs.filter(x=1)\n")
+    assert found["qs.filter(x=1)"] == "Booking"
+
+
+def test_two_functions_using_the_same_local_name_stay_separate():
+    found = _resolve(
+        "def a():\n    qs = Booking.objects.all()\n    qs.filter(x=1)\n"
+        "def b():\n    qs = Other.objects.all()\n    qs.filter(y=2)\n",
+        models={"Booking"},
+    )
+    assert found["qs.filter(x=1)"] == "Booking"
+    assert found["qs.filter(y=2)"] is None
+
+
+def test_a_name_assigned_from_two_models_is_dropped_not_guessed():
+    # Picking one and being wrong points a finding at code that is fine.
+    found = _resolve(
+        "def f():\n    qs = Booking.objects.all()\n"
+        "    qs = Other.objects.all()\n    qs.filter(x=1)\n",
+        models={"Booking", "Other"},
+    )
+    assert found["qs.filter(x=1)"] is None
+
+
+def test_self_model_resolves_when_the_class_declares_one():
+    found = _resolve(
+        "class V:\n    model = Booking\n"
+        "    def get(self):\n        self.model.objects.filter(x=1)\n"
+    )
+    assert found["self.model.objects.filter(x=1)"] == "Booking"
+
+
+def test_self_get_queryset_resolves_only_when_it_is_not_overridden():
+    inherited = _resolve(
+        "class V:\n    model = Booking\n"
+        "    def get(self):\n        self.get_queryset().filter(x=1)\n"
+    )
+    assert inherited["self.get_queryset().filter(x=1)"] == "Booking"
+
+    # A class that writes its own get_queryset() can return anything.
+    overridden = _resolve(
+        "class V:\n    model = Booking\n"
+        "    def get_queryset(self):\n        return Other.objects.all()\n"
+        "    def get(self):\n        self.get_queryset().filter(x=1)\n"
+    )
+    assert overridden["self.get_queryset().filter(x=1)"] is None
+
+
+def test_an_unknown_receiver_is_not_guessed_at():
+    found = _resolve("def f(qs):\n    qs.filter(x=1)\n")
+    assert found["qs.filter(x=1)"] is None

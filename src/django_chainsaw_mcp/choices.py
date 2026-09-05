@@ -50,6 +50,7 @@ import ast
 from pathlib import Path
 from typing import Any
 
+from . import querysets
 from .django_env import ensure_django
 
 # Keyword arguments to these carry field values.
@@ -115,27 +116,29 @@ def _literals(node: ast.AST) -> list[Any] | None:
     return None
 
 
-def _unwind(call: ast.Call) -> tuple[str, list[tuple[str, str, ast.AST]]] | None:
-    """A queryset chain as (model class name, [(method, key, value node)])."""
+def _unwind(
+    call: ast.Call,
+    models: set[str],
+    locals_: dict[str, str],
+    class_models: dict[str, str],
+) -> tuple[str, list[tuple[str, str, ast.AST]]] | None:
+    """A queryset chain as (model class name, [(method, key, value node)]).
+
+    The receiver is resolved by `querysets`, which understands a custom
+    manager, a local variable and `self.model` as well as `Model.objects`.
+    """
+    unwound = querysets.unwind(call, models, locals_, class_models)
+    if unwound is None:
+        return None
+    model, chain = unwound
     used: list[tuple[str, str, ast.AST]] = []
-    node: ast.AST = call
-
-    while isinstance(node, ast.Call):
-        func = node.func
-        if not isinstance(func, ast.Attribute):
-            return None
-        if func.attr in _QUERY_METHODS | _WRITE_METHODS:
-            for keyword in node.keywords:
-                if keyword.arg:
-                    used.append((func.attr, keyword.arg, keyword.value))
-        node = func.value
-
-    while isinstance(node, ast.Attribute):
-        if node.attr in {"objects", "_default_manager"}:
-            base = node.value
-            return (base.id, used) if isinstance(base, ast.Name) else None
-        node = node.value
-    return None
+    for method, node in chain:
+        if method not in _QUERY_METHODS | _WRITE_METHODS:
+            continue
+        for keyword in node.keywords:
+            if keyword.arg:
+                used.append((method, keyword.arg, keyword.value))
+    return (model, used) if used else None
 
 
 def _constructor(call: ast.Call) -> tuple[str, list[tuple[str, str, ast.AST]]] | None:
@@ -175,6 +178,7 @@ def choice_typos(
     by_class: dict[str, Any] = {}
     for model in apps.get_models():
         by_class.setdefault(model.__name__, model)
+    model_names = set(by_class)
 
     choices: dict[str, dict[str, set[Any]]] = {}
     fields_with_choices = 0
@@ -203,9 +207,12 @@ def choice_typos(
         lines = source.splitlines()
         relative = str(path.relative_to(root))
 
+        context = querysets.scopes(tree, model_names)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
-                result = _unwind(node) or _constructor(node)
+                names, class_models = querysets.context_for(context, node)
+                result = (_unwind(node, model_names, names, class_models)
+                          or _constructor(node))
                 if result is None:
                     continue
                 class_name, used = result

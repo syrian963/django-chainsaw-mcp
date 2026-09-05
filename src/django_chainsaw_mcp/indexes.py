@@ -24,6 +24,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from . import querysets
 from .django_env import ensure_django
 
 _LOOKUP_METHODS = {"filter", "exclude", "get", "order_by", "values", "values_list",
@@ -110,31 +111,33 @@ def _indexed_fields(model: Any) -> set[str]:
     return indexed
 
 
-def _unwind(call: ast.Call) -> tuple[str | None, list[tuple[str, str]]] | None:
-    """Flatten a queryset chain into (model class name, [(method, key), ...])."""
+def _unwind(
+    call: ast.Call,
+    models: set[str],
+    locals_: dict[str, str],
+    class_models: dict[str, str],
+) -> tuple[str | None, list[tuple[str, str]]] | None:
+    """Flatten a queryset chain into (model class name, [(method, key), ...]).
+
+    The receiver is resolved by `querysets`, which understands a custom
+    manager, a local variable and `self.model` as well as `Model.objects`.
+    """
+    unwound = querysets.unwind(call, models, locals_, class_models)
+    if unwound is None:
+        return None
+    model, chain = unwound
     used: list[tuple[str, str]] = []
-    node: ast.AST = call
-
-    while isinstance(node, ast.Call):
-        func = node.func
-        if not isinstance(func, ast.Attribute):
-            return None
-        if func.attr in _LOOKUP_METHODS:
-            for keyword in node.keywords:
-                if keyword.arg:
-                    used.append((func.attr, keyword.arg))
-            if func.attr in {"order_by", "values", "values_list", "distinct"}:
-                for argument in node.args:
-                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-                        used.append((func.attr, argument.value.lstrip("-")))
-        node = func.value
-
-    while isinstance(node, ast.Attribute):
-        if node.attr in {"objects", "_default_manager"}:
-            base = node.value
-            return (base.id, used) if isinstance(base, ast.Name) else None
-        node = node.value
-    return None
+    for method, node in chain:
+        if method not in _LOOKUP_METHODS:
+            continue
+        for keyword in node.keywords:
+            if keyword.arg:
+                used.append((method, keyword.arg))
+        if method in {"order_by", "values", "values_list", "distinct"}:
+            for argument in node.args:
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    used.append((method, argument.value.lstrip("-")))
+    return model, used
 
 
 def missing_indexes(
@@ -174,10 +177,12 @@ def missing_indexes(
         files_scanned += 1
         lines = source.splitlines()
 
+        context = querysets.scopes(tree, set(by_class))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            result = _unwind(node)
+            names, class_models = querysets.context_for(context, node)
+            result = _unwind(node, set(by_class), names, class_models)
             if result is None:
                 continue
             class_name, used = result

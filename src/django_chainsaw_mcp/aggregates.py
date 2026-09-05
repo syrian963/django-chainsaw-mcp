@@ -58,6 +58,7 @@ import ast
 from pathlib import Path
 from typing import Any
 
+from . import querysets
 from .django_env import ensure_django
 
 # Aggregate callables whose value a row multiplication actually corrupts.
@@ -150,91 +151,6 @@ def _aggregates_in(call: ast.Call) -> list[tuple[str, str, bool]]:
     return found
 
 
-def _unwind(
-    call: ast.Call,
-    models: set[str] | None = None,
-    locals_: dict[str, str] | None = None,
-) -> tuple[str, list[tuple[str, ast.Call]]] | None:
-    """A queryset chain as (model class name, [(method, the call node), ...]).
-
-    Three ways the chain can start, and only the first was handled at first:
-
-    - `Order.objects.annotate(...)`
-    - `Order.available.annotate(...)` - any manager, not only the one called
-      `objects`. A project with a custom manager is not a project this should
-      go quiet on.
-    - `qs.annotate(...)`, where `qs` was assigned from one of the above earlier
-      in the same function.
-
-    On a real project only 27 of 247 `annotate()` calls started from a model
-    directly. The other 220 started from a local variable, so a check that
-    only understood the first spelling saw 11% of the code and reported
-    "nothing found" about the rest.
-    """
-    used: list[tuple[str, ast.Call]] = []
-    node: ast.AST = call
-
-    while isinstance(node, ast.Call):
-        func = node.func
-        if not isinstance(func, ast.Attribute):
-            return None
-        used.append((func.attr, node))
-        node = func.value
-
-    while isinstance(node, ast.Attribute):
-        base = node.value
-        if isinstance(base, ast.Name):
-            # `Order.objects`, and `Order.available` for a custom manager.
-            if node.attr in {"objects", "_default_manager"} or (
-                models is not None and base.id in models
-            ):
-                return base.id, used
-        node = base
-
-    if isinstance(node, ast.Name) and locals_ is not None:
-        model = locals_.get(node.id)
-        if model is not None:
-            return model, used
-    return None
-
-
-def _queryset_locals(
-    scope: ast.AST, models: set[str]
-) -> dict[str, str]:
-    """Local names assigned from a queryset, mapped to their model.
-
-    Only straight-line assignment, and a name assigned twice from two
-    different models is dropped rather than guessed at.
-    """
-    found: dict[str, str] = {}
-    conflicting: set[str] = set()
-    for node in ast.walk(scope):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        value = node.value
-        if value is None:
-            continue
-        resolved = None
-        if isinstance(value, ast.Call):
-            unwound = _unwind(value, models, found)
-            resolved = unwound[0] if unwound else None
-        elif isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
-            if value.attr in {"objects", "_default_manager"} or value.value.id in models:
-                resolved = value.value.id
-        if resolved is None:
-            continue
-        for target in targets:
-            if not isinstance(target, ast.Name):
-                continue
-            if target.id in found and found[target.id] != resolved:
-                conflicting.add(target.id)
-            found[target.id] = resolved
-    for name in conflicting:
-        found.pop(name, None)
-    return found
-
-
 def multiplied_aggregates(search_path: str | None = None) -> dict[str, Any]:
     """Aggregates over more than one multi-valued relation in one query.
 
@@ -276,26 +192,19 @@ def multiplied_aggregates(search_path: str | None = None) -> dict[str, Any]:
         relative = str(path.relative_to(root))
         reported: set[int] = set()
 
-        # Names assigned a queryset, resolved per function so that two
-        # functions using `qs` for two different models stay separate.
-        names_for: dict[int, dict[str, str]] = {}
-        for scope in ast.walk(tree):
-            if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            local = _queryset_locals(scope, model_names)
-            for inner in ast.walk(scope):
-                names_for.setdefault(id(inner), local)
-        module_names = _queryset_locals(tree, model_names)
+        # Locals and `self.model`, resolved per scope by `querysets` so that
+        # two functions using `qs` for two different models stay separate.
+        context = querysets.scopes(tree, model_names)
 
         for node in ast.walk(tree):
-            names = names_for.get(id(node), module_names)
+            names, class_models = querysets.context_for(context, node)
             if not isinstance(node, ast.Call):
                 continue
             if isinstance(node.func, ast.Attribute) and node.func.attr in {
                 "annotate", "aggregate", "alias",
             }:
                 aggregates_in_source += 1
-            unwound = _unwind(node, model_names, names)
+            unwound = querysets.unwind(node, model_names, names, class_models)
             if unwound is None:
                 continue
             if isinstance(node.func, ast.Attribute) and node.func.attr in {

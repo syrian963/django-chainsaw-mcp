@@ -144,6 +144,21 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **One place decides which model a queryset is about.** `choices`, `indexes`
+  and `aggregates` each carried their own resolver that accepted only
+  `Model.objects`; on a real codebase that spelling is 2655 of 7056
+  queryset-shaped calls. The shared `querysets` module also understands a
+  custom manager, a local variable (per function, so two functions using `qs`
+  for two models stay two models, and a name assigned from two models is
+  dropped rather than guessed), `self.model`, and `self.get_queryset()` when
+  the class declares a model and has not overridden the method. That takes the
+  same project to 2839 - a 7% gain, not a transformation, because most of the
+  remainder (`self.instance.items`, `request.user.orders`) needs type
+  inference and is not guessed at.
+- The `self.get_queryset()` rule fires **zero** times on that codebase: 566
+  classes declare a model and inherit the method, and almost nothing calls it
+  there. Kept because it is correct, documented as earning nothing there.
+
 - **"Nothing calls this" is now two different answers.** A method invoked as
   `target.recalculate()` cannot be resolved without type inference, and saying
   nothing calls it is a confident wrong answer about a line that visibly does.
