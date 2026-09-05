@@ -287,7 +287,8 @@ cannot match the task. Also in the aggregate `check` as `celery`.
 django-chainsaw dangling [--search-path DIR] [--skip-templates] [--fail-on-findings]
 ```
 
-URL names and template names nothing will resolve, grouped by name. Also in the
+URL names, template names, signal senders and Celery task names nothing will
+resolve, grouped by name. Also in the
 aggregate `check` as `dangling`. Full page: [dangling.md](dangling.md).
 
 ### `choices`

@@ -747,9 +747,12 @@ def _cmd_dangling(args: argparse.Namespace) -> int:
 
     if not args.json:
         print(f"{report['url_names_registered']} URL name(s) across "
-              f"{report['urlconfs_read']} URLconf(s); "
-              f"{report['url_names_checked']} reference(s) and "
-              f"{report['template_names_checked']} template name(s) checked.")
+              f"{report['urlconfs_read']} URLconf(s), "
+              f"{report['task_names_known']} task name(s).")
+        print(f"Checked {report['url_names_checked']} URL reference(s), "
+              f"{report['template_names_checked']} template name(s), "
+              f"{report['signal_senders_checked']} signal sender(s), "
+              f"{report['task_names_checked']} task name(s).")
         print()
         if not report["finding_count"]:
             print("Every name resolves.")

@@ -6,12 +6,18 @@
     return redirect("order-detial")
     return render(request, "shop/order_detial.html", context)
     {% url 'shop:order-detial' order.pk %}
+    @receiver(post_save, sender="shop.Ordr")
 
 Every one of these is a name the framework resolves while serving a request,
 and a name nothing in Python checks. Rename a URL pattern or move a template
 and these keep importing, keep passing every test that does not walk that exact
 branch, and raise `NoReverseMatch` or `TemplateDoesNotExist` the first time a
 real person opens the page.
+
+The signal is quieter still. A string sender is resolved lazily through the app
+registry, so a misspelled label connects nothing: the receiver is never called,
+nothing is raised, and Django's own system checks report nothing. The behaviour
+that was supposed to happen simply does not, for as long as nobody notices.
 
 That is a different failure from a typo in a variable: it survives review, it
 survives the import, it survives CI, and it fails in production on a path
@@ -154,6 +160,129 @@ def _registered_url_names(root: Path) -> tuple[set[str], int, str | None]:
     return names, conf_count, problem
 
 
+_TASK_DECORATORS = {"shared_task", "task", "periodic_task"}
+
+
+def _task_names(root: Path) -> set[str]:
+    """Every name a Celery task in this project answers to.
+
+    Celery's default name for a task is `module.function`, and an explicit
+    `name=` overrides it. Both are readable from the source, which means this
+    does not need the Celery app to be loaded - and a project whose app is
+    only constructed by the worker still gets checked.
+    """
+    names: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        module = ".".join(path.relative_to(root).with_suffix("").parts)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                call = decorator if isinstance(decorator, ast.Call) else None
+                target = call.func if call else decorator
+                attr = getattr(target, "attr", None) or getattr(target, "id", "")
+                if attr not in _TASK_DECORATORS:
+                    continue
+                explicit = None
+                if call:
+                    for keyword in call.keywords:
+                        if keyword.arg == "name" and isinstance(
+                            keyword.value, ast.Constant
+                        ):
+                            explicit = keyword.value.value
+                names.add(explicit or f"{module}.{node.name}")
+
+    # If the app happens to be importable, its registry is the authority and
+    # covers tasks this cannot see - a third-party package's, for instance.
+    try:
+        from celery import current_app
+
+        names |= {name for name in current_app.tasks if not name.startswith("celery.")}
+    except Exception:  # noqa: BLE001 - no Celery, or no app configured
+        pass
+    return names
+
+
+def _beat_entries() -> list[tuple[str, str]]:
+    """(schedule key, task name) from the project's beat schedule."""
+    from django.conf import settings
+
+    for key in ("CELERY_BEAT_SCHEDULE", "CELERYBEAT_SCHEDULE"):
+        schedule = getattr(settings, key, None)
+        if not schedule:
+            continue
+        out = []
+        for name, entry in schedule.items():
+            task = entry.get("task") if isinstance(entry, dict) else None
+            if isinstance(task, str):
+                out.append((str(name), task))
+        return out
+    return []
+
+
+def _find_literal(root: Path, needle: str) -> tuple[str, int] | None:
+    """Where a string literal appears, so a settings finding has a location."""
+    quoted = (f'"{needle}"', f"'{needle}'")
+    for path in sorted(root.rglob("*.py")):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for number, text in enumerate(lines, start=1):
+            if any(form in text for form in quoted):
+                return str(path.relative_to(root)), number
+    return None
+
+
+def _model_exists(label: str, cache: dict[str, bool]) -> bool:
+    """Whether `app_label.ModelName` names a model in this project."""
+    if label not in cache:
+        from django.apps import apps
+
+        try:
+            apps.get_model(label)
+            cache[label] = True
+        except Exception:  # noqa: BLE001 - LookupError, ValueError, anything
+            cache[label] = False
+    return cache[label]
+
+
+def _sender_strings(node: ast.AST) -> list[tuple[str, int]]:
+    """String `sender=` arguments on a receiver decorator or a connect() call.
+
+    A signal connected to a string sender is resolved lazily, through the app
+    registry, whenever that model is finally registered. If the label is
+    misspelled the model is never registered under it, the receiver is never
+    connected, nothing raises, and Django's own system checks say nothing.
+    The signal simply never fires - which is verified in the test suite, not
+    assumed.
+    """
+    out: list[tuple[str, int]] = []
+    calls: list[ast.Call] = []
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        calls = [d for d in node.decorator_list
+                 if isinstance(d, ast.Call) and _name_of(d) == "receiver"]
+    elif isinstance(node, ast.Call) and _name_of(node) == "connect":
+        calls = [node]
+    for call in calls:
+        for keyword in call.keywords:
+            if keyword.arg != "sender":
+                continue
+            if isinstance(keyword.value, ast.Constant) and isinstance(
+                keyword.value.value, str
+            ):
+                out.append((keyword.value.value, call.lineno))
+    return out
+
+
 def _template_exists(name: str, cache: dict[str, bool]) -> bool:
     """Whether the project's own loaders can find this template."""
     if name not in cache:
@@ -231,7 +360,9 @@ def dangling_references(
     template_cache: dict[str, bool] = {}
 
     findings: list[dict[str, Any]] = []
-    checked = {"url": 0, "template": 0}
+    checked = {"url": 0, "template": 0, "sender": 0, "task": 0}
+    task_names = _task_names(root)
+    model_cache: dict[str, bool] = {}
     files_scanned = 0
 
     def report(kind: str, where: str, line: int, code: str, value: str, why: str,
@@ -261,6 +392,22 @@ def dangling_references(
         relative = str(path.relative_to(root))
 
         for node in ast.walk(tree):
+            for label, where in _sender_strings(node):
+                checked["sender"] += 1
+                if _model_exists(label, model_cache):
+                    continue
+                report(
+                    "signal", relative, where,
+                    lines[where - 1].strip() if where <= len(lines) else "",
+                    label,
+                    f"no model is registered as {label!r}. A string sender is "
+                    "resolved lazily through the app registry, so a label that "
+                    "never appears connects nothing: the receiver is never "
+                    "called, nothing raises, and the system checks say nothing "
+                    "either",
+                    "correct the label, or import the model and pass the class",
+                )
+
             if not isinstance(node, ast.Call):
                 continue
             name = _name_of(node)
@@ -286,6 +433,20 @@ def dangling_references(
                         "correct the name, or add the pattern it expects",
                     )
 
+            elif name == "send_task":
+                for value in _first_string(node, 0):
+                    checked["task"] += 1
+                    if value in task_names:
+                        continue
+                    report(
+                        "task", relative, node.lineno, code, value,
+                        f"no task in this project is named {value!r}. "
+                        "send_task() puts the message on the broker whatever "
+                        "the name is; the worker rejects it as unregistered, "
+                        "and the side that sent it sees nothing",
+                        "correct the name, or import the task and call it",
+                    )
+
             elif name in _TEMPLATE_CALLS:
                 for value in _first_string(node, _TEMPLATE_CALLS[name]):
                     if not value.strip():
@@ -302,6 +463,23 @@ def dangling_references(
                         "correct the path, or move the template to where the "
                         "loaders look",
                     )
+
+    for key, task in _beat_entries():
+        checked["task"] += 1
+        if task in task_names:
+            continue
+        where = _find_literal(root, task)
+        report(
+            "task",
+            where[0] if where else "settings",
+            where[1] if where else 0,
+            task, task,
+            f"the beat entry {key!r} runs {task!r}, and no task in this "
+            "project answers to that name. Beat keeps scheduling it, the "
+            "worker rejects each message as unregistered, and the job simply "
+            "stops happening - on a schedule nobody watches",
+            "correct the name, or restore the task it used to reach",
+        )
 
     templates_scanned = 0
     if include_templates:
@@ -370,6 +548,11 @@ def dangling_references(
         "finding_count": len(findings),
         "url_findings": sum(1 for f in findings if f["kind"] == "url"),
         "template_findings": sum(1 for f in findings if f["kind"] == "template"),
+        "signal_findings": sum(1 for f in findings if f["kind"] == "signal"),
+        "signal_senders_checked": checked["sender"],
+        "task_findings": sum(1 for f in findings if f["kind"] == "task"),
+        "task_names_known": len(task_names),
+        "task_names_checked": checked["task"],
         "url_names_registered": len(url_names),
         "urlconfs_read": urlconfs_read,
         "url_names_checked": checked["url"],

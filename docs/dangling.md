@@ -21,6 +21,35 @@ survives CI, and it lands on the path nobody was watching: the error page, the
 rarely-taken redirect, the admin action, the PDF export somebody runs at month
 end.
 
+## Four registries, one question
+
+| kind | the string | what happens when it is wrong |
+| --- | --- | --- |
+| `url` | `reverse("order-detial")`, `{% url %}` | `NoReverseMatch`, on that branch |
+| `template` | `render(..., "shop/order_detial.html")`, `{% include %}` | `TemplateDoesNotExist`, while rendering |
+| `signal` | `@receiver(post_save, sender="shop.Ordr")` | **nothing at all** |
+| `task` | a beat entry's `task`, `send_task("...")` | **nothing at all** |
+
+The bottom two are the quiet ones.
+
+A string sender is resolved lazily through the app registry. A label that never
+appears connects nothing: no exception, no system check message, no receiver.
+The behaviour that was supposed to happen simply does not. That is verified in
+the test suite rather than assumed — a receiver registered against a misspelled
+label is not in `post_save._live_receivers()` and Django's own checks say
+nothing about it.
+
+A beat entry naming a task that no longer exists is worse, because it looks
+alive. Beat keeps scheduling it on time, the worker rejects each message as
+unregistered, and the job stops happening on a schedule nobody watches.
+`send_task()` is the same failure from the other end: the broker accepts the
+message whatever the name is, and the sender hears nothing.
+
+Task names are derived from the source — Celery's default is `module.function`
+and an explicit `name=` overrides it — so a project whose Celery app is only
+constructed inside the worker still gets checked. If the app happens to be
+importable its registry is added, which covers tasks in third-party packages.
+
 ## Both sides use the project's own machinery
 
 URL names come from the resolver, walked through every `include()`, so a

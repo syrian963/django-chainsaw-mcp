@@ -38,5 +38,18 @@ TEMPLATES = [
 # knows it serves requests.
 ROOT_URLCONF = "demoshop.urls"
 
+# One entry names a task that exists, one names a task that was renamed. Beat
+# keeps scheduling both; only one of them ever runs.
+CELERY_BEAT_SCHEDULE = {
+    "nightly-reconcile": {
+        "task": "shop.tasks.reconcile",
+        "schedule": 3600,
+    },
+    "nightly-cleanup": {
+        "task": "shop.tasks.cleanup_old_orders",
+        "schedule": 3600,
+    },
+}
+
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

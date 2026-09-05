@@ -597,9 +597,11 @@ Documented in [`celery.md`](celery.md).
 
 ## `dangling_references`
 
-URL names and template names that nothing will resolve. `redirect("order-detial")`
-imports cleanly, passes every test that does not take that branch, and raises
-`NoReverseMatch` for the first person who does.
+URL names, template names, signal senders and Celery task names that nothing
+will resolve. `redirect("order-detial")` imports cleanly and raises
+`NoReverseMatch` for the first person who takes that branch;
+`@receiver(post_save, sender="shop.Ordr")` and a beat entry naming a renamed
+task raise nothing at all and simply never happen.
 
 | Argument | Default | Meaning |
 | --- | --- | --- |

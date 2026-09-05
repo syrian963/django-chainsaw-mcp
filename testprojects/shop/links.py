@@ -50,3 +50,17 @@ def wrong_template(request):
 def a_name_built_at_runtime(request, which):
     """Cannot be resolved without running the code. Deliberately silent."""
     return render(request, f"shop/{which}.html", {})
+
+
+def send_a_task_that_exists():
+    from celery import current_app
+
+    return current_app.send_task("shop.tasks.reconcile")
+
+
+def send_a_task_that_does_not():
+    """The broker accepts the message. The worker rejects it. The sender
+    hears nothing either way."""
+    from celery import current_app
+
+    return current_app.send_task("shop.tasks.reconsile")

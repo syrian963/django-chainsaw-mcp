@@ -7,6 +7,19 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`dangling_references` also reads signal senders and Celery task names.**
+  These are the quiet half of the same family. A string sender - `@receiver(
+  post_save, sender="shop.Ordr")` - is resolved lazily through the app
+  registry, so a misspelled label connects nothing: no exception, no system
+  check message, no receiver, and the behaviour simply never happens. A beat
+  entry naming a task that no longer exists is worse because it looks alive:
+  beat keeps scheduling it on time, the worker rejects each message as
+  unregistered, and the job stops happening on a schedule nobody watches.
+  `send_task()` is the same failure from the sending end. Task names are
+  derived from the source - Celery's default is `module.function`, an explicit
+  `name=` overrides it - so a project whose app is only built inside the worker
+  is still checked; the app's own registry is added when it is importable.
+
 - **`dangling_references`: names the framework has to resolve, checked ahead of
   the request.** `redirect("order-detial")`, `render(request,
   "shop/order_detial.html")` and `{% url 'shop:order-detial' %}` are resolved

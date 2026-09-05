@@ -71,3 +71,25 @@ def _build_receiver():
 
 post_save.connect(_build_receiver(), sender=Shipment, weak=False)
 post_save.connect(_build_receiver(), sender=Shipment, weak=False)
+
+
+@receiver(post_save, sender="shop.Tag")
+def string_sender_is_fine(sender, instance, **kwargs):
+    """A label that resolves. Connected, and it fires.
+
+    Deliberately on a model no other fixture uses, so this does not lengthen
+    a receiver chain another check asserts the shape of.
+    """
+
+
+@receiver(post_save, sender="shop.Ordr")
+def string_sender_typo(sender, instance, **kwargs):
+    """Never connected, never called, and nothing anywhere says so.
+
+    Django resolves a string sender lazily through the app registry. A label
+    that never appears simply never resolves: no exception on connect, no
+    system check message, no receiver.
+    """
+
+
+post_save.connect(string_sender_typo, sender="shop.Shpiment")

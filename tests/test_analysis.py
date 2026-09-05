@@ -1966,3 +1966,41 @@ def test_findings_are_grouped_by_name():
     grouped = {g["name"]: g for g in report["by_name"]}
     assert grouped["daily-reprot"]["uses"] == 2
     assert len(grouped["daily-reprot"]["files"]) == 2
+
+
+def test_a_string_signal_sender_that_names_no_model_is_found():
+    # Verified rather than assumed: Django resolves a string sender lazily, so
+    # a misspelled label connects nothing, raises nothing, and the system
+    # checks report nothing. The receiver simply never runs.
+    report, _ = _dangling()
+    senders = {f["name"] for f in report["findings"] if f["kind"] == "signal"}
+    assert "shop.Ordr" in senders
+    assert "shop.Shpiment" in senders, "connect(sender=...) should be checked too"
+    assert "shop.Order" not in senders
+
+
+def test_a_beat_entry_naming_a_task_that_does_not_exist_is_found():
+    # Beat keeps scheduling it, the worker rejects each message, and the job
+    # stops happening on a schedule nobody watches.
+    report, _ = _dangling()
+    tasks = {f["name"] for f in report["findings"] if f["kind"] == "task"}
+    assert "shop.tasks.cleanup_old_orders" in tasks
+    assert "shop.tasks.reconcile" not in tasks
+
+
+def test_send_task_with_a_misspelled_name_is_found():
+    report, _ = _dangling()
+    reported = _lines_reported(report, "links.py")
+    assert reported & _links("send_a_task_that_does_not")
+    assert not (reported & _links("send_a_task_that_exists"))
+
+
+def test_task_names_are_derived_without_loading_the_celery_app():
+    # Celery's default name is module.function and an explicit name= overrides
+    # it; both are readable from the source, so a project whose app is only
+    # built by the worker still gets checked.
+    from django_chainsaw_mcp.dangling import _task_names
+    from django_chainsaw_mcp.project import project_root
+
+    names = _task_names(project_root())
+    assert "shop.tasks.reconcile" in names

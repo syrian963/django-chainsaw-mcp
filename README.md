@@ -89,7 +89,7 @@ well as the project path.
 | `queries_in_loops` | Queries written inside a loop, split by which of three fixes applies. |
 | `request_impact` | Every finding grouped by the entry points that reach it, so the question becomes which endpoint to fix. |
 | `choice_typos` | Literals a field's `choices` will never match: valid SQL, zero rows, no exception. |
-| `dangling_references` | URL names and template names nothing will resolve, found before the request does. |
+| `dangling_references` | URL names, templates, signal senders and Celery tasks nothing will resolve. |
 | `open_endpoints` | Sensitive fields on endpoints anybody can call. |
 | `unused_eager_loading` | Joins and prefetches nothing in the response reads. |
 | `check` | Run everything that applies, one severity-sorted list, one exit code. |
