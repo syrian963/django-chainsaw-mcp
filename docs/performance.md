@@ -10,20 +10,43 @@ times the commands against it.
 
 | Command | Time |
 | --- | --- |
-| `models --short` | 1.4 s |
-| `deploy-safety` | 1.4 s |
-| `tenancy` | 2.3 s |
-| `datetimes` | 2.3 s |
-| `indexes` | 3.3 s |
-| `check` (everything) | **5.4 s** |
-| `explain` one model | **5.1 s** |
+| `models --short` | 1.8 s |
+| `deploy-safety` | 2.0 s |
+| `datetimes` | 3.1 s |
+| `tenancy` | 4.0 s |
+| `indexes` | 4.1 s |
+| `explain` one model | 8.7 s |
+| `check` (everything) | **35.6 s** |
 
 ```bash
 bash benchmark.sh 60 25 45      # apps, models per app, view modules per app
 ```
 
-Five seconds for a full analysis of a large project is fine in CI and fine at a
-terminal.
+**That last number was 5.4 seconds when there were ten checks.** There are
+twenty-one now, and a full run costs what twenty-one analyses of 2822 files
+cost. Half a minute is still fine in CI and borderline at a terminal, which is
+what `--only` and `--skip` are for.
+
+### Where the half minute goes
+
+Each check on its own, on the same project. Every one of these includes about
+2.2 s of Django boot, so the marginal cost of adding a check to a run is
+roughly the number minus that:
+
+| Check | Time | | Check | Time |
+| --- | --- | --- | --- | --- |
+| `races` | 9.4 s | | `open` | 4.5 s |
+| `loops` | 7.6 s | | `dangling` | 4.3 s |
+| `on-commit` | 6.7 s | | `deploy-safety` | 4.0 s |
+| `tenancy` | 5.6 s | | `n+1-serializer` | 3.9 s |
+| `celery` | 5.5 s | | `datetimes` | 3.8 s |
+| `indexes` | 5.2 s | | `routes` | 3.7 s |
+| `aggregates` | 4.5 s | | the rest | 2.2–3.5 s |
+
+The expensive ones are the ones that walk the call graph. Their costs do not
+add up to 35.6 s — the individual runs total about 43 s of marginal work — and
+the difference is the call graph being built once per process instead of once
+per check.
 
 ## The number that was not fine
 
@@ -95,6 +118,17 @@ Almost all of it is `ast.parse` on every Python file. There is no way around
 reading the source, and the AST is what makes the analysis precise rather than
 a text search, which is a trade already made deliberately in `deploy_safety`.
 
-The CLI runs one command and exits, so the cache does nothing there. It exists
-for the MCP server, which is a long-lived process answering many questions
-about one project. That is where the repetition is.
+### Two caches, and only one of them is for the server
+
+The **model cache** above is for the MCP server: a long-lived process asked
+about one model after another, where the repetition is across requests. The CLI
+runs one command and exits, so that cache does nothing for it.
+
+The **call graph** is different. Seven checks build one, and `check` runs all of
+them, so a single CLI invocation used to parse the same unchanged tree seven
+times. It is now built once per process and reused while a `stat`-only
+fingerprint — file count, newest mtime, total size — matches. That is worth
+about 7 seconds of the 35.6, inside one command, with no server involved.
+
+An earlier version of this page said the cache does nothing for the CLI. That
+was true when there was one cache.

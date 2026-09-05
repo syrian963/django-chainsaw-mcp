@@ -175,6 +175,25 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The README stated the wrong number of checks, and gave a false reason for
+  the name.** It said thirteen checks need the app registry when it had been
+  eighteen for some time, and that the name stays because renaming the
+  repository would break every link to it - GitHub permanently redirects a
+  renamed repository, so that was simply untrue. The name stays because it is
+  accurate: 18 of the 21 checks need Django.
+- **`docs_check.sh` now reads those numbers out of the code and compares them.**
+  Prose that states a number goes stale in silence, which is the worst way for
+  it to go; the gate was demonstrated failing on a wrong number before it was
+  kept.
+- **`project.py` listed decimal precision and read-modify-save as needing
+  nothing but Python.** Both walk `apps.get_models()`. The aspiration was
+  reasonable and the sentence was false, which is the worse of the two.
+- **`docs/performance.md` was measured against ten checks and there are
+  twenty-one.** A full `check` on 2822 files is 35.6 s, not the 5.4 s the page
+  claimed, and the page now carries the per-check breakdown. It also said the
+  cache does nothing for the CLI, which stopped being true when the call graph
+  gained one: that is worth about 7 s inside a single command.
+
 - **The same nested field appeared as several identical findings.** It is
   reported once per root serializer that reaches it - deliberately, because the
   prefetch belongs on each root's queryset and those are different fixes - but

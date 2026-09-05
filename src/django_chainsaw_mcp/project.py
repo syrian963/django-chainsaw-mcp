@@ -11,11 +11,21 @@ a transaction: those are properties of Python and of whatever database library
 is in use, and the Django import was an accident of where the code started.
 
 So the framework is detected rather than assumed, and each check declares what
-it needs:
+it needs. As it stands that is 18 checks needing Django, one needing nothing
+but Python, one FastAPI and one SQLAlchemy:
 
-    needs Django       models, migrations, signals, templates, DRF
-    needs a web layer  endpoints, permissions, serialisation
-    needs nothing      the call graph, decimal precision, read-modify-save
+    needs Django       models, migrations, signals, templates, DRF, and also
+                       decimal precision and read-modify-save, because both
+                       of those resolve field definitions through the registry
+    needs FastAPI      route inventory and what the routes serialise
+    needs SQLAlchemy   relationship loading
+    needs nothing      blocking calls on the event loop, and the call graph
+                       every other check is built on
+
+An earlier version of this docstring listed decimal precision and
+read-modify-save under "needs nothing", which they are not: both walk
+`apps.get_models()`. The aspiration was reasonable and the sentence was
+false, which is the worse of the two.
 
 A project can be several of these at once. A Django project that also serves a
 FastAPI app is normal, and detection reports every framework found rather than

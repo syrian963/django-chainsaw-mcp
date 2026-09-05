@@ -1,7 +1,9 @@
 # django-chainsaw-mcp
 
-An MCP server and CLI that **analyses** a Python web project rather than
-describing it.
+An MCP server and CLI that **analyses** a Django project rather than
+describing it. A handful of the checks reach past Django — one needs nothing
+but Python, one reads FastAPI routes, one reads SQLAlchemy — and the rest read
+the app registry.
 
 Several Django MCP servers already exist. They answer *what exists*: list the
 models, dump the schema, run the ORM, read the settings. None of the ones I
@@ -15,14 +17,28 @@ looked at answer *what will hurt*:
 - which queries read tenant-scoped rows without scoping the query,
 - what a single `save()` actually sets off, three hops away,
 - which endpoint a stranger can use to make the database do three thousand
-  queries.
+  queries,
+- which of three hundred findings a request can actually reach, and through
+  which endpoint,
+- which `filter(status="cancelled")` the `choices` will never match, returning
+  zero rows and raising nothing,
+- which `reverse()` call, template, signal receiver or scheduled task points at
+  a name that no longer exists,
+- which dashboard number is the product of two joins rather than the count it
+  claims to be.
 
 Everything is read-only, and most of it never touches the database.
 
-**On the name.** It started as a Django tool and Django is still where most of
-it lives — thirteen of the checks need the app registry. The rest need only
-Python, and several are FastAPI-specific. Renaming the repository would break
-every link to it, so the name stays and this paragraph does the work instead.
+**On the name.** It is a Django tool, and the name is not a historical
+accident to apologise for: of the 21 checks in the aggregate run, **18 need the
+app registry**. One needs only Python, one is FastAPI-specific and one is for
+SQLAlchemy. The reach beyond Django is real and it is small, which is what the
+two tables below say.
+
+An earlier version of this paragraph claimed the name stays because renaming
+the repository would break every link to it. That is not true — GitHub
+permanently redirects a renamed repository — and it was the wrong reason for
+the right conclusion. The name stays because it is accurate.
 
 ## One command to try it
 
