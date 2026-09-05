@@ -7,6 +7,32 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`multiplied_aggregates`: counts and sums a join has multiplied.**
+  `annotate(lines=Count("lines"), shipments=Count("shipments"))` joins two
+  multi-valued relations, so an order with 3 lines and 2 shipments produces 6
+  rows and both counts come back as 6. Nothing raises, and the only way to
+  notice is to already know the answer - which is why it lives on dashboards.
+  Django's own documentation warns about it and no linter checks it, because
+  none of them resolve a field path against the model registry. `Count(
+  distinct=True)` is treated as correct; `Sum` has no equivalent and needs a
+  Subquery, so a query is still reported when every Count in it is distinct.
+  A filter joining a second multi-valued relation is the same multiplication
+  and is reported in its own bucket, because the fix is an `Exists()` rather
+  than a `distinct`.
+- **Only `Count` and `Sum` are reported.** A join repeats rows uniformly within
+  each group, so `Min` and `Max` return the value they would anyway and `Avg`
+  divides a multiplied total by a multiplied count. The first version included
+  them and reported a correct `Min("items__begin")` on a real project as a
+  defect.
+- **A queryset held in a local variable is resolved**, as is a custom manager.
+  On a real project only 27 of 247 `annotate()` calls started from a model
+  directly; a check that understood only that spelling saw 11% of the code and
+  reported "nothing found" about the rest. `annotate_calls_in_source` and
+  `annotate_calls_seen` are in the report, because a clean result means nothing
+  without the denominator.
+- New CLI subcommand `aggregates`, MCP tool `multiplied_aggregates`, and
+  `aggregates` in the aggregate check.
+
 - **`dangling_references` also reads signal senders and Celery task names.**
   These are the quiet half of the same family. A string sender - `@receiver(
   post_save, sender="shop.Ordr")` - is resolved lazily through the app

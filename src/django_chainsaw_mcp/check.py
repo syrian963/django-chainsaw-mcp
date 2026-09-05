@@ -28,6 +28,7 @@ from .fastapi_exposure import fastapi_exposure
 from .project import get_profile, project_root
 from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .indexes import missing_indexes
+from .aggregates import multiplied_aggregates
 from .bypass import bypassed_effects
 from .choices import choice_typos
 from .dangling import dangling_references
@@ -313,6 +314,26 @@ def _from_celery(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_aggregates(report: dict[str, Any]) -> list[dict[str, Any]]:
+    out = [
+        _finding(
+            "aggregates", f["severity"],
+            f"{f['model']}: {' and '.join(f['relations'])} joined in one query",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("findings", [])
+    ]
+    out.extend(
+        _finding(
+            "aggregates", f["severity"],
+            f"{f['model']}: a filter joins {' and '.join(f['filtered_on'])}",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        )
+        for f in report.get("multiplied_by_a_filter", [])
+    )
+    return out
+
+
 def _from_choices(report: dict[str, Any]) -> list[dict[str, Any]]:
     out = [
         _finding(
@@ -392,6 +413,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "celery": (celery_arguments, lambda o: {}, _from_celery),
     "loops": (queries_in_loops, lambda o: {}, _from_loops),
     "choices": (choice_typos, lambda o: {}, _from_choices),
+    "aggregates": (multiplied_aggregates, lambda o: {}, _from_aggregates),
     "dangling": (dangling_references, lambda o: {}, _from_dangling),
     "open": (open_endpoints, lambda o: {}, _from_open),
     "migrations": (migration_risk, lambda o: {}, _from_migrations),
@@ -419,6 +441,7 @@ _REQUIRES: dict[str, str] = {
     "celery": "django",
     "loops": "django",
     "choices": "django",
+    "aggregates": "django",
     "dangling": "django",
     "open": "django",
     "migrations": "django",

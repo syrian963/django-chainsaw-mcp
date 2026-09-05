@@ -43,6 +43,7 @@ from .explain import explain_model as _explain_model
 from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
+from .aggregates import multiplied_aggregates as _multiplied_aggregates
 from .choices import choice_typos as _choice_typos
 from .dangling import dangling_references as _dangling_references
 from .impact import impact as _impact
@@ -683,6 +684,34 @@ def dangling_references(
         search_path=search_path,
         include_templates=include_templates,
     )
+
+
+@mcp.tool()
+def multiplied_aggregates(search_path: str | None = None) -> dict[str, Any]:
+    """Aggregates whose numbers are wrong because a join multiplied the rows.
+
+        Order.objects.annotate(lines=Count("lines"), shipments=Count("shipments"))
+
+    Joining two multi-valued relations gives the cartesian product of them: an
+    order with 3 lines and 2 shipments produces 6 rows, and both counts come
+    back as 6. Nothing raises. Two plausible numbers, both the product of the
+    two, usually on a dashboard nobody can check by hand.
+
+    Only Count and Sum are reported. A join repeats rows uniformly within each
+    group, so Min and Max return the value they would anyway and Avg divides a
+    multiplied total by a multiplied count - including them reported a correct
+    query as a defect on the first real project this saw.
+
+    Count(distinct=True) is treated as correct. Sum has no equivalent and needs
+    a Subquery, so a query is still reported when every Count in it is distinct
+    but a Sum crosses a second relation.
+
+    Django's own documentation warns about this and no linter checks it.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+    """
+    return _guard(_multiplied_aggregates, search_path=search_path)
 
 
 @mcp.tool()

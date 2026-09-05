@@ -291,6 +291,15 @@ URL names, template names, signal senders and Celery task names nothing will
 resolve, grouped by name. Also in the
 aggregate `check` as `dangling`. Full page: [dangling.md](dangling.md).
 
+### `aggregates`
+
+```bash
+django-chainsaw aggregates [--search-path DIR] [--fail-on-findings]
+```
+
+Counts and sums multiplied by a join across two multi-valued relations. Also in
+the aggregate `check` as `aggregates`. Full page: [aggregates.md](aggregates.md).
+
 ### `choices`
 
 ```bash

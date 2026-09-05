@@ -50,6 +50,7 @@ from .explain import explain_model
 from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
 from .indexes import missing_indexes
 from .introspect import list_models
+from .aggregates import multiplied_aggregates
 from .choices import choice_typos
 from .dangling import dangling_references
 from .impact import impact
@@ -768,6 +769,38 @@ def _cmd_dangling(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_aggregates(args: argparse.Namespace) -> int:
+    report = multiplied_aggregates(search_path=args.search_path)
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"{report['annotate_calls_in_source']} annotate()/aggregate() call(s) "
+              f"in {report['files_scanned']} file(s); "
+              f"{report['aggregates_seen']} Count/Sum over a multi-valued "
+              "relation resolved to a model.")
+        print()
+        if not report["finding_count"] and not report["filter_count"]:
+            print("No query joins two multi-valued relations.")
+        for finding in report["findings"]:
+            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
+                  f"  {finding['model']}")
+            print(f"            {', '.join(finding['aggregates'])}")
+            print(f"            {finding['why']}")
+            print(f"            fix: {finding['fix']}")
+            print()
+        for finding in report["multiplied_by_a_filter"]:
+            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
+                  f"  {finding['model']} (multiplied by a filter)")
+            print(f"            {finding['why']}")
+            print(f"            fix: {finding['fix']}")
+            print()
+        print(report["note"])
+
+    if args.fail_on_findings and (report["finding_count"] or report["filter_count"]):
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1884,6 +1917,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any name that will not resolve")
     p.set_defaults(func=_cmd_dangling)
+
+    p = sub.add_parser("aggregates",
+                       help="aggregates multiplied by a join across two relations")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any multiplied aggregate")
+    p.set_defaults(func=_cmd_aggregates)
 
     p = sub.add_parser("choices",
                        help="literals a field's choices will never match")

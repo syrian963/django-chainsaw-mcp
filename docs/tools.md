@@ -611,6 +611,19 @@ task raise nothing at all and simply never happen.
 Every URLconf in the project is read, not only `ROOT_URLCONF`. `by_name` groups
 the findings. Full page: [dangling.md](dangling.md).
 
+## `multiplied_aggregates`
+
+Counts and sums whose numbers are wrong because a join across two multi-valued
+relations multiplied the rows. An order with 3 lines and 2 shipments produces 6
+rows and both counts come back as 6.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+
+Only `Count` and `Sum`: a join repeats rows uniformly, so `Min`, `Max` and
+`Avg` are unaffected. Full page: [aggregates.md](aggregates.md).
+
 ## `choice_typos`
 
 Literals compared against a field whose `choices` do not contain them.

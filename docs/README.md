@@ -44,6 +44,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`queries_in_loops`](loop-queries.md) | database work written inside a loop, split by its fix |
 | [`request_impact`](impact.md) | findings grouped by the entry points that reach them |
 | [`choice_typos`](choices.md) | literals a field's `choices` will never match |
+| [`multiplied_aggregates`](aggregates.md) | counts and sums a join has multiplied |
 | [`dangling_references`](dangling.md) | URL names, templates, signal senders and tasks nothing will resolve |
 | [`blocking_in_async`](async-blocking.md) | synchronous calls that stop the whole event loop |
 | [`fastapi_exposure`](fastapi.md) | endpoints that serialise more than they declare |
@@ -91,6 +92,7 @@ Every check here answers a question with a consequence attached:
 | Which loop asks the database the same thing N times? | `queries_in_loops` |
 | I have three hundred findings - where do I start? | `request_impact` |
 | Why does this filter always return nothing? | `choice_typos` |
+| Why is this dashboard number too high? | `multiplied_aggregates` |
 | Which reverse() calls and templates are already broken? | `dangling_references` |
 | Which scheduled job quietly stopped running? | `dangling_references` |
 | Which call stops the event loop for every request? | `blocking_in_async` |

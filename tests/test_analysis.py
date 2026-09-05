@@ -2004,3 +2004,102 @@ def test_task_names_are_derived_without_loading_the_celery_app():
 
     names = _task_names(project_root())
     assert "shop.tasks.reconcile" in names
+
+
+# --- aggregates: numbers multiplied by a join ------------------------------
+
+
+def _aggregates():
+    from django_chainsaw_mcp.aggregates import multiplied_aggregates
+
+    report = multiplied_aggregates()
+    lines = {f["line"] for f in report["findings"]}
+    lines |= {f["line"] for f in report["multiplied_by_a_filter"]}
+    return report, lines
+
+
+def _report_fn(name):
+    import ast
+
+    from django_chainsaw_mcp.project import project_root
+
+    source = (project_root() / "shop" / "aggregation.py").read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return {
+                line for line in
+                (getattr(n, "lineno", None) for n in ast.walk(node))
+                if line is not None
+            }
+    raise AssertionError(f"no fixture named {name}")
+
+
+def test_two_multi_valued_relations_in_one_annotate_are_reported():
+    # 3 lines and 2 shipments is 6 rows, and both counts come back as 6.
+    _, lines = _aggregates()
+    assert lines & _report_fn("two_relations_multiply")
+
+
+def test_one_relation_is_not_a_finding():
+    _, lines = _aggregates()
+    assert not (lines & _report_fn("one_relation_is_fine"))
+
+
+def test_count_distinct_is_treated_as_correct():
+    _, lines = _aggregates()
+    assert not (lines & _report_fn("two_relations_with_distinct_are_correct"))
+
+
+def test_a_sum_beside_a_distinct_count_is_still_wrong():
+    # Sum has no distinct option; the duplicates are real rows to it.
+    report, lines = _aggregates()
+    assert lines & _report_fn("a_sum_cannot_be_saved_by_distinct")
+    sums = [f for f in report["findings"] if any("Sum" in a for a in f["aggregates"])]
+    assert sums
+    assert "Subquery" in sums[0]["fix"]
+
+
+def test_min_max_and_avg_survive_the_multiplication():
+    # A join repeats rows uniformly within each group, so the smallest value
+    # is still the smallest and the mean is unchanged. Including them reported
+    # a correct query on a real project as a defect.
+    _, lines = _aggregates()
+    assert not (lines & _report_fn("min_and_max_survive_the_multiplication"))
+    assert not (lines & _report_fn("an_average_survives_it_too"))
+
+
+def test_a_forward_foreign_key_cannot_multiply_anything():
+    _, lines = _aggregates()
+    assert not (lines & _report_fn("a_forward_foreign_key_cannot_multiply"))
+
+
+def test_a_filter_joining_a_second_relation_is_reported_separately():
+    report, _ = _aggregates()
+    filtered = {f["line"] for f in report["multiplied_by_a_filter"]}
+    assert filtered & _report_fn("a_filter_joins_a_second_relation")
+    assert not (filtered & _report_fn("a_filter_on_the_same_relation_is_fine"))
+
+
+def test_a_queryset_held_in_a_local_variable_is_resolved():
+    # On a real project only 27 of 247 annotate() calls started from a model
+    # directly. A check that only understood that spelling saw 11% of the code.
+    _, lines = _aggregates()
+    assert lines & _report_fn("assigned_to_a_local")
+
+
+def test_the_same_local_name_in_two_functions_stays_two_models():
+    report, lines = _aggregates()
+    assert lines & _report_fn("two_functions_can_use_the_same_name")
+    product = [
+        f for f in report["findings"]
+        if f["line"] in _report_fn("two_functions_can_use_the_same_name")
+    ]
+    assert product and product[0]["model"].endswith("Product")
+
+
+def test_the_report_says_how_much_of_the_source_it_could_resolve():
+    # A clean result means nothing without the denominator: on a real project
+    # only 27 of 247 annotate() calls started from a model directly.
+    report, _ = _aggregates()
+    assert report["annotate_calls_in_source"] > 0
+    assert report["annotate_calls_in_source"] >= report["annotate_calls_seen"]
