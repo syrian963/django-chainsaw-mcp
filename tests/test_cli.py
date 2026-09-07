@@ -69,6 +69,11 @@ def test_every_subcommand_is_reachable_from_the_parser():
         "async",
         "impact",
         "n+1-serializer",
+        "celery",
+        "routes",
+        "sqla",
+        "amplification",
+        "tenancy",
     ],
 )
 def test_a_command_runs_and_returns_a_documented_exit_code(command, capsys):
@@ -85,6 +90,32 @@ def test_fail_on_findings_gates_the_commands_that_offer_it(command):
     # The demo project deliberately contains what each of these looks for, so
     # a zero exit would mean the flag stopped working.
     assert run(command, "--fail-on-findings") == EXIT_FINDINGS
+
+
+def test_deploy_safety_gates_on_the_planted_migration(capsys):
+    # demoshop ships a migration that drops a field the code still uses, so a
+    # clean exit here would mean the check stopped seeing it.
+    assert run("deploy-safety") == EXIT_FINDINGS
+    assert "legacy_code" in capsys.readouterr().out
+
+
+def test_the_template_check_scans_the_configured_template_directories(capsys):
+    assert run("n+1") == EXIT_OK
+    assert capsys.readouterr().out.strip()
+
+
+def test_the_contract_captures_a_snapshot_and_then_compares_against_it(tmp_path, capsys):
+    snapshot = tmp_path / "contract.json"
+
+    assert run("contract", "--snapshot", str(snapshot), "--update") == EXIT_OK
+    assert snapshot.is_file(), "--update should write the snapshot"
+    capsys.readouterr()
+
+    # Comparing a capture against itself has to be empty. Anything else means
+    # the capture is not deterministic, and a contract check that reports
+    # phantom changes is one people stop reading.
+    assert run("contract", "--snapshot", str(snapshot)) == EXIT_OK
+    assert "unchanged" in capsys.readouterr().out
 
 
 def test_json_output_is_json(capsys):

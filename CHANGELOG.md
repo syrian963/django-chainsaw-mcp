@@ -115,6 +115,25 @@ Everything below this heading is the history of getting there, newest first.
 
 ### Added
 
+- **Tests for the two features that decide what CI is allowed to ignore.**
+  `--since main` and `--baseline` both answer their question by *removing*
+  findings, which makes them the only parts of this tool where a bug hides a
+  real defect instead of inventing a fake one. Both were driven only through
+  the CLI, so `gitdiff` measured 18% and `baseline` 38%. The cases a
+  subprocess test cannot express are now covered directly: a finding path and
+  a git path that do not share a prefix, a fingerprint that has to survive
+  code moving down a file while still distinguishing two findings in it, an
+  empty baseline file meaning "no baseline" rather than "corrupt", and a
+  missing ref raising instead of reporting an empty diff.
+- **Tests for the contract classification**, which is the product of that
+  check rather than a detail: a new *required* field is an addition that
+  breaks every existing writer, a field becoming nullable is risky rather than
+  breaking, and a serializer that stopped resolving is unreadable rather than
+  removed.
+- Every CLI subcommand is now exercised in process. Coverage 83% to **86%**,
+  with no module below 70%; `gitdiff` 18% to 86%, `baseline` 38% to 92%,
+  `api_contract` 56% to 83%. 304 tests.
+
 - **`SECURITY.md`**, and it leads with the thing that matters: this tool
   imports the project you point it at, so analysing an unfamiliar repository
   is the same act as running it. It also states what the tool does not do -
