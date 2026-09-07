@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -1299,8 +1300,16 @@ def _cmd_check(args: argparse.Namespace) -> int:
         frameworks = ", ".join(report.get("frameworks") or {}) or "none detected"
         print(f"Frameworks found: {frameworks}")
         print(f"{len(skipped)} check(s) do not apply to this project:")
+        # Eighteen checks skipped for one missing environment variable printed
+        # the same 300-character reason eighteen times, which buries the one
+        # sentence that tells somebody what to do about it.
+        by_reason: dict[str, list[str]] = {}
         for name, reason in sorted(skipped.items()):
-            print(f"    {name:<16} {reason}")
+            by_reason.setdefault(reason, []).append(name)
+        for reason, names in sorted(by_reason.items(), key=lambda kv: -len(kv[1])):
+            print(f"    {', '.join(names)}")
+            for line in textwrap.wrap(reason, width=76):
+                print(f"      {line}")
 
     # A check that could not run is not a pass.
     if report["checks_failed"] and args.strict:

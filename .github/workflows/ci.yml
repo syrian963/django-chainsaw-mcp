@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +56,36 @@ jobs:
 
       - name: Escaping side effects
         run: bash oncommit_check.sh
+
+  oldest-django:
+    # The tool reads the app registry, so the Django version it runs against is
+    # part of its contract. 4.2 is still LTS and widely deployed; claiming
+    # support for it in the classifiers without testing it would be a guess.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: A target project on Django 4.2 LTS
+        run: |
+          python -m venv /tmp/target
+          /tmp/target/bin/pip install -q --upgrade pip
+          /tmp/target/bin/pip install -q "django~=4.2.0" djangorestframework .
+          /tmp/target/bin/python -c "import django; print(django.get_version())"
+
+      - name: The analysis has to run there too
+        env:
+          DJANGO_CHAINSAW_PROJECT_PATH: testprojects
+          DJANGO_CHAINSAW_SETTINGS_MODULE: demoshop.settings
+        run: |
+          /tmp/target/bin/django-chainsaw models --short
+          # demoshop ships an unsafe migration, so a clean exit would be wrong.
+          if /tmp/target/bin/django-chainsaw check --tenant-root shop.Customer; then
+            echo "expected findings on the demo project"
+            exit 1
+          fi
 
   dogfood:
     # The analyser run against its own demo project, which is the closest

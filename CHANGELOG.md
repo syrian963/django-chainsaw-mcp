@@ -7,6 +7,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Django 4.2 through 6.1 are tested, not assumed.** The classifiers claimed
+  5.0 and 6.0; 4.2 LTS is what a lot of projects actually run, so CI now
+  installs a target project on `django~=4.2.0` and runs the analysis against
+  it. Verified by hand first: 188 findings on the demo project on 4.2.30, the
+  same as on 5.2 and 6.1.
+- Python 3.14 is in the classifiers and the CI matrix. It already worked; the
+  metadata just did not say so.
+
 - **`scopes()` walks the tree once instead of four times.** It walked for
   classes, again for functions, and once per function body for its locals. A
   profile put `ast.walk` at 3.6 million nodes yielded for a tree with 1.18
@@ -42,6 +50,12 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 - `callgraph` uses the fingerprint helper in `project` instead of its own copy.
 
 ### Fixed
+
+- **Eighteen checks skipped for one missing environment variable printed the
+  same 300-character reason eighteen times.** That is the first thing somebody
+  sees who forgot `DJANGO_CHAINSAW_SETTINGS_MODULE`, and it buried the one
+  sentence telling them what to do. Skipped checks are grouped by reason now,
+  with the reason wrapped once.
 
 - **A function with no queryset locals was indistinguishable from one with no
   scope at all**, so the module's locals applied inside it - which is how a
