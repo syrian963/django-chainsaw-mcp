@@ -8,6 +8,7 @@ driven over stdio, exactly as a client such as Claude Code would do it.
 import asyncio
 import json
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 from mcp.client.client import Client
@@ -197,8 +198,45 @@ async def main() -> int:
             print("COMPLETE model='ord':", values)
             if "shop.Order" not in values:
                 failures.append(f"model completion did not suggest shop.Order: {values}")
-        except Exception as exc:  # noqa: BLE001 - reported, not raised
+        except Exception as exc:
             failures.append(f"completion over the wire failed: {type(exc).__name__}: {exc}")
+
+        # A progress notification that is declared and never sent looks
+        # exactly like a fast tool. Only a real client subscribing to the
+        # token can tell the difference, so `check` is driven here with one
+        # and the notifications are counted.
+        seen: list[tuple[float, float | None, str | None]] = []
+
+        async def note(progress, total, message):
+            seen.append((progress, total, message))
+
+        report = _payload(
+            await client.call_tool(
+                "check",
+                {"tenant_root": "shop.Customer"},
+                progress_callback=note,
+            )
+        )
+        print(f"CHECK findings={report.get('finding_count')} "
+              f"progress_notifications={len(seen)}")
+        if not seen:
+            failures.append("check reported no progress over the wire")
+        else:
+            named = [m for _, _, m in seen if m]
+            print("  first:", seen[0], "last:", seen[-1])
+            if len(named) != len(seen):
+                failures.append("a progress notification arrived without a message")
+            # The point of the message is naming the check that is running.
+            # A counter alone would be the thing this replaced.
+            if not any("indexes" in (m or "") for m in named):
+                failures.append(f"progress never named a real check: {named[:5]}")
+            monotonic = all(a[0] <= b[0] for a, b in pairwise(seen))
+            if not monotonic:
+                failures.append("progress went backwards")
+            if seen[-1][0] != seen[-1][1]:
+                failures.append(f"the last progress was not the total: {seen[-1]}")
+        if report.get("finding_count") is None:
+            failures.append("check returned no findings key over the wire")
 
         resources = await client.list_resources()
         uris = [str(r.uri) for r in resources.resources]

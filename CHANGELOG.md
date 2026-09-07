@@ -5,6 +5,14 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pytest tests/test_server.py` on its own reported 36 failures** that said
+  "Missing environment variable" and meant "you ran me with the rest of the
+  suite last time". The module read the demo project out of environment
+  variables another test file happened to set first. It asks for the project
+  now.
+
 ### Changed
 
 - **Django 4.2 through 6.1 are tested, not assumed.** The classifiers claimed
@@ -131,6 +139,25 @@ Everything below this heading is the history of getting there, newest first.
   shallow call graphs and the checks that walk one pay for that difference.
 
 ### Added
+
+- **`check` reports progress, and names the check it is on.** It runs 21
+  analyses and is the only call here slow enough to matter - a minute or more
+  on a large project - and a bare spinner for a minute is indistinguishable
+  from a hung server. The analysis moved to a worker thread to make this
+  possible: awaited on the event loop it held the loop for the whole run, so
+  no notification could be written to the transport and the client could not
+  cancel. Verified over stdio with a real progress token: 22 notifications,
+  `deploy-safety (1 of 21)` through `merging`, ending on the total.
+- **`check` declares its output shape, and the SDK enforces it.** One schema,
+  not 36: its envelope is already a contract read by the CLI printer, the
+  SARIF export, the severity gate, the baselines and the HTML report, and the
+  finding inside it is built in one place. A key renamed in `check.py` now
+  fails on the next run rather than quietly vanishing from whatever was
+  reading it - proven by feeding the tool a finding with a severity outside
+  the vocabulary and watching the call be rejected. Nothing is required, so
+  the `{"ok": false, "error": ...}` answer a bad settings module produces is
+  still a valid return and not a validation failure; extra keys are allowed,
+  so a check that starts carrying more evidence is not a protocol error.
 
 - **The MCP server now uses the protocol rather than a corner of it.** It had
   36 tools and one resource, and nothing else: no instructions, no

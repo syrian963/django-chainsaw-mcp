@@ -68,6 +68,46 @@ def tool_functions() -> dict[str, object]:
     return found
 
 
+@pytest.fixture(autouse=True)
+def _demo(django_project):
+    """Every test here needs the demo project loaded.
+
+    Without this the module passed only as part of a full run, because some
+    earlier file had set the environment variables. Running this one file
+    reported 36 failures that said "Missing environment variable" and meant
+    "you ran me on my own".
+    """
+
+
+class _FakeContext:
+    """Enough of `Context` for a tool that reports progress.
+
+    The real one is built per request by the server runner and cannot be
+    constructed here. What a tool touches is `report_progress`, so that is
+    what this provides - and recording the calls means the direct-call tests
+    also see whether progress happened at all.
+    """
+
+    def __init__(self) -> None:
+        self.progress: list[tuple[float, float | None, str | None]] = []
+
+    async def report_progress(self, progress, total=None, message=None) -> None:
+        self.progress.append((progress, total, message))
+
+
+def _call(tool, **kwargs):
+    """Call a tool function directly, async or not, context or not."""
+    import asyncio
+
+    signature = inspect.signature(tool)
+    if "ctx" in signature.parameters:
+        kwargs["ctx"] = _FakeContext()
+    result = tool(**kwargs)
+    if inspect.iscoroutine(result):
+        return asyncio.run(result)
+    return result
+
+
 def test_the_module_exposes_every_registered_tool_as_a_function():
     # If the decorator ever stopped leaving the function behind, this file
     # would silently test nothing.
@@ -87,10 +127,13 @@ def test_a_tool_returns_a_report_rather_than_raising(name):
         for parameter in signature.parameters.values()
         if parameter.default is inspect.Parameter.empty
         and parameter.name not in kwargs
+        # `ctx` is supplied by the server per request, not by the caller, and
+        # `_call` fills it in below.
+        and parameter.name != "ctx"
     ]
     assert not missing, f"{name} needs {missing}; add them to ARGUMENTS"
 
-    report = tool(**kwargs)
+    report = _call(tool, **kwargs)
 
     # A resource answers with a string by protocol, a tool with a mapping.
     # Both are valid; returning neither is not.
@@ -108,6 +151,27 @@ def test_a_tool_returns_a_report_rather_than_raising(name):
         error = str(report.get("error", ""))
         assert "not a directory" not in error, f"{name}: {error}"
         assert "Missing environment" not in error, f"{name}: {error}"
+
+
+def test_the_slow_tool_reports_progress_through_the_context():
+    """A progress notification is invisible until something subscribes.
+
+    `client_test.py` proves it reaches the transport. This proves the tool
+    asks for it at all, which is the half that breaks when the threading
+    wrapper is edited: `report_progress` called from a worker thread with no
+    portal raises there and nowhere else, and the analysis would still return
+    a correct report with the progress silently gone.
+    """
+    import asyncio
+
+    context = _FakeContext()
+    report = asyncio.run(server.check(ctx=context, only=["money"]))
+
+    assert report["finding_count"] is not None
+    assert context.progress, "the tool ran without reporting any progress"
+    assert context.progress[0][1] == 1.0, "the total is the checks that will run"
+    assert context.progress[-1][0] == context.progress[-1][1]
+    assert "money" in (context.progress[0][2] or "")
 
 
 def test_a_tool_that_cannot_run_says_so_instead_of_crashing():

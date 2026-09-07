@@ -209,6 +209,16 @@ exactly like a model with nothing attached to it.
 **The server ships instructions.** An assistant handed 36 tools with no
 ordering picks by name, and the names do not say which question each answers.
 
+**`check` reports progress, and says which check it is on.** It is the one
+slow call here - a minute or more on a large project - and the twenty-one
+checks are not equal in cost. A bare spinner for a minute is indistinguishable
+from a hung server; `deploy-safety (1 of 21)` is not.
+
+**`check` declares its output shape.** One schema, not thirty-six: its
+envelope is already a contract, and the SDK validates the return against it,
+so a key renamed in the code fails on the next run instead of quietly
+vanishing from whatever was reading it.
+
 Full reference: [`docs/tools.md`](docs/tools.md).
 
 ## Contributing, and the bar a new check has to clear

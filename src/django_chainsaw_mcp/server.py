@@ -17,7 +17,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+import anyio.from_thread
+import anyio.to_thread
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import ToolAnnotations
 
 from .aggregates import multiplied_aggregates as _multiplied_aggregates
@@ -54,6 +56,7 @@ from .overfetch import unused_eager_loading as _unused_eager_loading
 from .project import get_profile as _get_profile
 from .project import resolve_root as _resolve_root
 from .scan import scan_templates as _scan_templates
+from .schemas import CheckReport
 from .serializer_nplusone import serializer_nplusone as _serializer_nplusone
 from .serializers import serializer_exposure as _serializer_exposure
 from .signals import what_happens_on as _what_happens_on
@@ -141,6 +144,35 @@ def _guard(fn, *args, **kwargs) -> dict[str, Any]:
         return fn(*args, **kwargs)
     except (DjangoBootError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
+
+
+async def _with_progress(ctx: Context, fn, **kwargs) -> dict[str, Any]:
+    """Run a long analysis off the event loop and report progress out of it.
+
+    Every analysis here is synchronous CPU work. Awaited directly it would
+    hold the event loop for the whole run, and that is what stops a progress
+    notification from ever reaching the transport and stops the client from
+    cancelling. So the work goes to a worker thread, and the notifications
+    come back through `anyio.from_thread.run`, which is the only way to reach
+    the loop from one.
+
+    A client that sent no progress token gets nothing extra: `report_progress`
+    is a no-op without one, and the cost is a thread hop.
+    """
+
+    def on_progress(done: int, total: int, upcoming: str) -> None:
+        message = f"{upcoming} ({done + 1} of {total})" if upcoming else "merging"
+        try:
+            anyio.from_thread.run(ctx.report_progress, float(done), float(total), message)
+        except Exception:
+            # A progress notification is never worth failing an analysis for.
+            # A closed transport, or a client that stopped listening, arrives
+            # here; the run has to finish and return either way.
+            pass
+
+    return await anyio.to_thread.run_sync(
+        lambda: _guard(fn, on_progress=on_progress, **kwargs)
+    )
 
 
 @mcp.tool(annotations=READS_ONLY)
@@ -810,11 +842,12 @@ def suggest_fixes(tenant_root: str = "auth.User") -> dict[str, Any]:
 
 
 @mcp.tool(annotations=READS_ONLY)
-def check(
+async def check(
+    ctx: Context,
     tenant_root: str = "auth.User",
     only: list[str] | None = None,
     skip: list[str] | None = None,
-) -> dict[str, Any]:
+) -> CheckReport:
     """Run every analysis and return one severity-sorted list.
 
     The single call to reach for on an unfamiliar project. It runs the checks
@@ -824,12 +857,18 @@ def check(
     A check that fails to run is listed in `checks_failed` rather than counted
     as clean.
 
+    This is the one slow call here - a minute or more on a large project - and
+    it reports progress as each check starts, so a client can name the check
+    that is running instead of showing nothing for a minute.
+
     Args:
         tenant_root: the model that owns data, for the ownership check.
         only: run just these checks.
         skip: run everything except these.
     """
-    return _guard(_run_all, tenant_root=tenant_root, only=only, skip=skip)
+    return await _with_progress(
+        ctx, _run_all, tenant_root=tenant_root, only=only, skip=skip
+    )
 
 
 @mcp.tool(annotations=READS_ONLY)

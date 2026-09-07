@@ -494,6 +494,7 @@ def run_all(
     tenant_root: str = "auth.User",
     only: list[str] | None = None,
     skip: list[str] | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run the analyses and merge them into one severity-sorted list.
 
@@ -501,6 +502,11 @@ def run_all(
         tenant_root: the model that owns data, for the ownership check.
         only: run just these checks.
         skip: run everything except these.
+        on_progress: called as (completed, total, next_check) before each
+            check starts, and once more when the last one finishes. The
+            checks are not equal in cost - `aggregates` and `choices` walk
+            every function body - so the count moves unevenly and is a
+            position, not an estimate of the time left.
     """
     # Detecting the frameworks first means a FastAPI project gets the checks
     # that apply instead of a settings error, and a Django project is
@@ -548,7 +554,10 @@ def run_all(
     # Twenty analyses over one unchanged tree: parsing it once instead of
     # twenty times is the single biggest saving available here.
     enable_source_cache()
-    for name in runnable:
+    total = len(runnable)
+    for index, name in enumerate(runnable):
+        if on_progress is not None:
+            on_progress(index, total, name)
         fn, build_kwargs, adapt = _CHECKS[name]
         try:
             report = fn(**build_kwargs(options))
@@ -557,6 +566,9 @@ def run_all(
             ran[name] = {"ok": True, "findings": len(produced)}
         except Exception as exc:
             ran[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    if on_progress is not None:
+        on_progress(total, total, "")
 
     findings.sort(key=lambda f: (_ORDER.get(f["severity"], 9), f["check"], f["location"] or ""))
 

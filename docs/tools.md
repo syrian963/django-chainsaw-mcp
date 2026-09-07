@@ -34,6 +34,55 @@ snapshot when called with `update=True`; it is still non-destructive and still
 idempotent, and a client that auto-approves reads should stop and ask about
 that one.
 
+## Progress
+
+`check` runs twenty-one analyses and is the only call here slow enough to
+need this - a minute or more on a large project. It reports progress as each
+one starts, so a client can name the check that is running:
+
+```
+0/21  deploy-safety (1 of 21)
+1/21  migrations (2 of 21)
+...
+21/21 merging
+```
+
+The count is a position and not an estimate of the time left. The checks are
+not equal in cost: `aggregates` and `choices` walk every function body in the
+project and take most of the run between them, so the number moves in jumps.
+
+Progress costs nothing when nobody asked for it. A client that sends no
+progress token gets no notifications, which is the default.
+
+## Output schema
+
+`check` is the only tool that declares one, and that is deliberate. Thirty-six
+schemas would be thirty-six things to keep true, and a schema that has drifted
+from the code is worse than none. `check` is the exception because its
+envelope is already a contract - the CLI printer, the SARIF export, the
+severity gate, the baselines and the HTML report all read it - and the finding
+inside it is built in exactly one place.
+
+Declaring it does two things. A client can see the keys before it calls, and
+the SDK validates the return against the schema, so a key renamed in
+`check.py` fails on the next run rather than disappearing from whichever
+consumer was reading it.
+
+Two deliberate choices in the shape:
+
+- **Nothing is required.** `{"ok": false, "error": "..."}` is a valid return -
+  a settings module that will not import comes back that way rather than as a
+  transport error - and a required field would turn that readable answer into
+  a validation failure.
+- **Extra keys are allowed.** A check that starts carrying one more piece of
+  evidence should not be a protocol error. The alternative would make the
+  schema the thing that has to be edited before any check can say more than
+  it does today.
+
+The severity vocabulary is closed: `critical`, `high`, `medium`, `low`. That
+is enforced, so a new check inventing a fifth would fail loudly - a test pins
+the list next to the sort order that has to agree with it.
+
 
 ## `project_info`
 
