@@ -48,6 +48,9 @@ jobs:
       - name: API contract lifecycle
         run: bash contract_check.sh
 
+      - name: Coverage, with a floor
+        run: bash coverage_check.sh
+
       - name: Documentation covers the code
         run: bash docs_check.sh
 

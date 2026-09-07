@@ -51,6 +51,13 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`django-chainsaw choices` raised `KeyError` on every run that found
+  something.** When the untyped-comparison route was removed the printer kept
+  a loop over the report key that went with it. No test entered that branch:
+  the shell suites do not run `choices`, and the pytest tests call the
+  analysis rather than the command. The in-process CLI test found it on its
+  first run, which is the whole argument for having one.
+
 - **Eighteen checks skipped for one missing environment variable printed the
   same 300-character reason eighteen times.** That is the first thing somebody
   sees who forgot `DJANGO_CHAINSAW_SETTINGS_MODULE`, and it buried the one
@@ -107,6 +114,20 @@ Everything below this heading is the history of getting there, newest first.
   shallow call graphs and the checks that walk one pay for that difference.
 
 ### Added
+
+- **In-process tests for both front ends, and a coverage floor.** The script
+  suites drive the CLI and the MCP server as subprocesses, which is the right
+  way to test the exit codes CI will see and the wrong way to find out whether
+  a printer reaches for a key that exists. Coverage could not follow those
+  subprocesses either: `cli.py` measured 0% across 1479 statements while being
+  exercised on every run. `tests/test_cli.py` calls 20 subcommands through
+  `main(argv)` and `tests/test_server.py` calls all 36 MCP tools directly.
+  Coverage went from 64% to 82%, `server.py` from 0% to 97%, and
+  `coverage_check.sh` holds a floor of 78%.
+- **Badges, with the numbers checked.** A badge goes stale in the same silence
+  as prose, so `docs_check.sh` derives the checks, MCP tools, CLI commands and
+  Python versions from the code and compares them against what the README
+  shows. Demonstrated failing on a wrong number before it was kept.
 
 - **`multiplied_aggregates`: counts and sums a join has multiplied.**
   `annotate(lines=Count("lines"), shipments=Count("shipments"))` joins two

@@ -54,6 +54,7 @@ dev = [
     "django>=6.1.1",
     "djangorestframework>=3.18.0",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "requests>=2.34.2",
     "ruff>=0.16.6",
 ]

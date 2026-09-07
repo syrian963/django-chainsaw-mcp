@@ -977,12 +977,6 @@ def _cmd_choices(args: argparse.Namespace) -> int:
             print(f"            {finding['why']}")
             print(f"            fix: {finding['fix']}")
             print()
-        for finding in report["untyped_comparisons"]:
-            print(f"  {finding['severity'].upper():<9} {finding['file']}:{finding['line']}"
-                  f"  .{finding['field']} (model unknown)")
-            print(f"            {finding['code']}")
-            print(f"            {finding['why']}")
-            print()
         print(report["note"])
 
     if args.fail_on_findings and report["finding_count"]:
