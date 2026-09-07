@@ -3,7 +3,34 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-07
+
+The first release, not yet tagged. 21 checks in the aggregate run, 36 MCP
+tools with five prompts, 34 CLI subcommands, 329 tests across 17 suites at
+86% coverage, and a documentation page per check that states what that
+check cannot see.
+
+Everything below this heading is the history of getting there, newest
+first. There is no separate Unreleased section: no tag exists yet, so
+every change so far belongs to this release.
+
+### Fixed
+
+- **The tests badge read 320 while the suite collected 329, and nothing
+  checked it.** Every other number on that row is derived from the code by
+  `docs_check.sh`; this one and the coverage figure were typed. Both are gated
+  now - the tests badge against what pytest collects, the coverage badge
+  inside `coverage_check.sh`, which is the only place that knows the measured
+  value. Both proven red before green. The first version of the coverage gate
+  was itself broken - `badge/coverage-86%25` holds two numbers and it read
+  both - which passed the drift test for the wrong reason: a gate that is
+  always red looks exactly like a gate that works.
+- **The 0.1.0 notes described a release that did not match the repository.**
+  They claimed 33 CLI subcommands, 199 tests and 16 suites; the real figures
+  are 34, 329 and 17. No tag exists, so nothing had shipped under those
+  numbers, and the seventeen entries sitting in an Unreleased section above
+  them belonged to this release too - a reader of the published notes would
+  have missed them. Folded in, numbers corrected.
 
 ### Fixed
 
@@ -98,14 +125,6 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   seconds across runs. It now quotes CPU time and says plainly that the figure
   is an order of magnitude rather than a measurement.
 
-
-## [0.1.0] - 2026-09-07
-
-The first release. 21 checks in the aggregate run, 36 MCP tools, 33 CLI
-subcommands, 199 tests across 16 suites, and a documentation page per check
-that states what that check cannot see.
-
-Everything below this heading is the history of getting there, newest first.
 
 ### Release preparation
 

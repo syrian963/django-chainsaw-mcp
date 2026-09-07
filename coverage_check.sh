@@ -50,3 +50,19 @@ if [ "$total" -lt "$FLOOR" ]; then
   exit 1
 fi
 echo "  ok    Abdeckung ueber der Untergrenze"
+
+# The README states this number on a badge, and a badge goes stale in exactly
+# the silence a floor does not catch: coverage can rise and the badge still
+# reads the old figure, which is the sort of small untruth that makes a reader
+# doubt the numbers that matter. This is the only place that knows the real
+# value, so the comparison belongs here rather than in docs_check.sh.
+badge=$(grep -oE 'badge/coverage-[0-9]+' README.md | head -1 | grep -oE '[0-9]+$')
+if [ -z "$badge" ]; then
+  echo "  FAIL  kein coverage-Badge im README gefunden"
+  exit 1
+fi
+if [ "$badge" != "$total" ]; then
+  echo "  FAIL  coverage-Badge sagt ${badge}%, gemessen ${total}%"
+  exit 1
+fi
+echo "  ok    coverage-Badge stimmt mit der Messung  Badge ${badge}%, real ${total}%"
