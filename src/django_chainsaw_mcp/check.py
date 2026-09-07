@@ -38,7 +38,7 @@ from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
-from .project import get_profile, project_root
+from .project import enable_source_cache, get_profile, project_root
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
 from .serializers import serializer_exposure
@@ -528,6 +528,9 @@ def run_all(
                     runnable.remove(name)
                     not_applicable[name] = f"Django could not be loaded: {exc}"
 
+    # Twenty analyses over one unchanged tree: parsing it once instead of
+    # twenty times is the single biggest saving available here.
+    enable_source_cache()
     for name in runnable:
         fn, build_kwargs, adapt = _CHECKS[name]
         try:

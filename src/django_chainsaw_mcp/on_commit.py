@@ -48,6 +48,7 @@ from typing import Any
 
 from . import callgraph
 from .django_env import ensure_django
+from .project import parse_file, read_source
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
@@ -282,8 +283,8 @@ def _views_with_side_effects(root: Path, include_low_confidence: bool) -> list[d
             continue
         full = root / fn.file
         try:
-            source = full.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(full)
+            tree = parse_file(full)
         except (OSError, SyntaxError):
             continue
         node = _function_node(tree, fn.name, fn.line)
@@ -375,8 +376,8 @@ def escaping_side_effects(
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
 
@@ -423,8 +424,8 @@ def escaping_side_effects(
             continue
         full = root / fn.file
         try:
-            source = full.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(full)
+            tree = parse_file(full)
         except (OSError, SyntaxError):
             continue
         lines = source.splitlines()

@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from .django_env import ensure_django
 from .nplusone import analyse_template, set_include_search_dirs
+from .project import parse_file
 
 _TEMPLATE_SUFFIXES = {".html", ".jinja", ".jinja2"}
 _SKIP_DIRS = {
@@ -193,7 +194,7 @@ def _view_context_map(root: Path) -> dict[str, dict[str, str]]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
 

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
+from .project import read_source
 
 # Manager and queryset calls that appear in templates and are not model fields.
 _MANAGER_SUFFIXES = {"all", "count", "first", "last", "exists"}
@@ -186,7 +187,7 @@ def _load_included(name: str) -> Any:
         if candidate.is_file():
             try:
                 return _project_engine().from_string(
-                    candidate.read_text(encoding="utf-8", errors="replace")
+                    read_source(candidate)
                 )
             except Exception:
                 return None

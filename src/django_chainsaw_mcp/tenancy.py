@@ -41,6 +41,7 @@ from typing import Any
 
 from . import callgraph
 from .django_env import ensure_django
+from .project import parse_file, read_source
 
 # Chain methods that can carry a scoping filter.
 _FILTERING = {"filter", "exclude", "get", "get_or_create", "update_or_create"}
@@ -371,8 +372,8 @@ def find_unscoped_queries(
         if _exempt(file_path) and not include_exempt:
             continue
         try:
-            source = file_path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(file_path)
+            tree = parse_file(file_path)
         except (OSError, SyntaxError):
             continue
 

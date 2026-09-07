@@ -38,6 +38,8 @@ import importlib
 from pathlib import Path
 from typing import Any
 
+from .project import parse_file
+
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
     ".pytest_cache", "site-packages", "dist", "build", "migrations",
@@ -89,7 +91,7 @@ def load_serializer_modules(root: Path) -> dict[str, Any]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         if not _declares_serializer(tree):
@@ -235,7 +237,7 @@ def load_view_modules(root: Path) -> dict[str, Any]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         declares = any(

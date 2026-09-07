@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
+from .project import parse_file, read_source
 
 _DESTRUCTIVE = {
     "RemoveField": "field",
@@ -115,8 +116,8 @@ def _iter_files(root: Path) -> Iterable[Path]:
 
 def _scan_python(path: Path, root: Path, symbol: str, kind: str) -> list[Reference]:
     try:
-        source = path.read_text(encoding="utf-8", errors="replace")
-        tree = ast.parse(source)
+        source = read_source(path)
+        tree = parse_file(path)
     except (OSError, SyntaxError):
         return []
 
@@ -139,7 +140,7 @@ def _scan_python(path: Path, root: Path, symbol: str, kind: str) -> list[Referen
 
 def _scan_template(path: Path, root: Path, symbol: str) -> list[Reference]:
     try:
-        source = path.read_text(encoding="utf-8", errors="replace")
+        source = read_source(path)
     except OSError:
         return []
 
@@ -206,8 +207,8 @@ def _raw_sql_sites(root: Path) -> list[dict[str, Any]]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         lines = source.splitlines()

@@ -48,6 +48,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .project import fingerprint, parse_file
+
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
     ".pytest_cache", "site-packages", "dist", "build",
@@ -464,31 +466,6 @@ def _resolve_one(
 _cache: dict[str, tuple[tuple[int, float, int], CallGraph]] = {}
 
 
-def _fingerprint(root: Path) -> tuple[int, float, int]:
-    """How many files, how recent, how large - enough to notice an edit.
-
-    Stat-only, so it costs a fraction of a parse. The newest mtime alone is
-    not enough: an edit within the same clock tick that leaves the length
-    unchanged is exactly the case that bit this project once already, through
-    Python's own bytecode cache. The total size catches the ordinary version
-    of that, and `refresh=True` is there for the rest.
-    """
-    count = 0
-    newest = 0.0
-    total = 0
-    for path in root.rglob("*.py"):
-        if any(part in _SKIP_DIRS for part in path.parts):
-            continue
-        try:
-            info = path.stat()
-        except OSError:
-            continue
-        count += 1
-        total += info.st_size
-        newest = max(newest, info.st_mtime)
-    return (count, newest, total)
-
-
 def clear_cache() -> None:
     """Forget every cached graph. For tests, and for a long-lived server."""
     _cache.clear()
@@ -502,7 +479,7 @@ def build(root: Path, *, refresh: bool = False) -> CallGraph:
         refresh: rebuild even if the fingerprint is unchanged.
     """
     key = str(root)
-    mark = _fingerprint(root)
+    mark = fingerprint(root)
     if not refresh:
         cached = _cache.get(key)
         if cached is not None and cached[0] == mark:
@@ -520,8 +497,7 @@ def _build(root: Path) -> CallGraph:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
 

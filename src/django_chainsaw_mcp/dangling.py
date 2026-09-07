@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
+from .project import parse_file, read_source
 
 # Calls whose first string argument is a URL name.
 _URL_CALLS = {"reverse", "reverse_lazy", "resolve_url"}
@@ -93,7 +94,7 @@ def _urlconf_modules(root: Path) -> list[str]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         for node in tree.body:
@@ -176,7 +177,7 @@ def _task_names(root: Path) -> set[str]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         module = ".".join(path.relative_to(root).with_suffix("").parts)
@@ -233,7 +234,7 @@ def _find_literal(root: Path, needle: str) -> tuple[str, int] | None:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = read_source(path).splitlines()
         except OSError:
             continue
         for number, text in enumerate(lines, start=1):
@@ -381,8 +382,8 @@ def dangling_references(
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
 
@@ -486,7 +487,7 @@ def dangling_references(
             if any(part in _SKIP_DIRS for part in path.parts):
                 continue
             try:
-                source = path.read_text(encoding="utf-8", errors="replace")
+                source = read_source(path)
             except OSError:
                 continue
             templates_scanned += 1

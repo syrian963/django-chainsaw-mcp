@@ -44,7 +44,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from .project import get_profile, resolve_root
+from .project import get_profile, parse_file, read_source, resolve_root
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
@@ -296,8 +296,8 @@ def sqlalchemy_nplusone(search_path: str | None = None) -> dict[str, Any]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         trees[str(path.relative_to(root))] = (tree, source.splitlines())

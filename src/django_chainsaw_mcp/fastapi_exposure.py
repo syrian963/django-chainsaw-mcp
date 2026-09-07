@@ -36,7 +36,7 @@ import ast
 import re
 from typing import Any
 
-from .project import get_profile, resolve_root
+from .project import get_profile, parse_file, read_source, resolve_root
 from .serializers import _SENSITIVE
 
 _SKIP_DIRS = {
@@ -231,8 +231,8 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
         trees[str(path.relative_to(root))] = (tree, source.splitlines())

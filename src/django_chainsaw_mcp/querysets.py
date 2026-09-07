@@ -50,7 +50,6 @@ finding at all.
 from __future__ import annotations
 
 import ast
-from typing import Any
 
 _MANAGER_NAMES = {"objects", "_default_manager"}
 
@@ -115,6 +114,33 @@ def receiver_model(
     if isinstance(node, ast.Name) and locals_:
         return locals_.get(node.id)
     return None
+
+
+def needs_context(call: ast.Call) -> bool:
+    """Could a local or `self.model` change the answer for this chain?
+
+    Only a chain that bottoms out at a bare name or at `self` can: everything
+    else either names a model directly or names nothing.
+
+    This exists because the scope lookup is the expensive part, and it was
+    being paid for every call node in the project - hundreds of thousands of
+    them, almost none of which is a queryset. Walking the chain is a handful
+    of steps; scanning the file's scopes is not.
+    """
+    node: ast.AST = call
+    for _ in range(60):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if not isinstance(func, ast.Attribute):
+                return False
+            node = func.value
+        elif isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == "self":
+                return True
+            node = node.value
+        else:
+            break
+    return isinstance(node, ast.Name)
 
 
 def unwind(
@@ -202,17 +228,22 @@ def _declared_model(cls: ast.ClassDef, models: set[str]) -> str | None:
     return None
 
 
-def scopes(tree: ast.AST, models: set[str]) -> dict[int, dict[str, Any]]:
-    """node id -> the locals and the `self.model` in force where it appears.
+def scopes(tree: ast.AST, models: set[str]) -> list[tuple[int, int, int, str, dict, dict]]:
+    """Every scope in the file as (span, start, end, kind, locals, class models).
 
-    Built once per file. A node inside a method sees its function's locals and
-    its class's declared model; a node at module level sees the module's.
+    The first version mapped every node id to its scope, which meant walking
+    each scope in full - and a node inside a nested function was visited once
+    per enclosing scope. On a real codebase that turned two checks from 22 s
+    and 20 s into 66 s and 61 s.
+
+    This walks each function body exactly once, to collect its locals, and
+    leaves the lookup to a line comparison.
+
+    A function with no queryset locals is still recorded, with an empty dict.
+    Leaving it out let the module's locals apply inside it, which is how a
+    `qs` in one function came to resolve to another function's model.
     """
-    context: dict[int, dict[str, Any]] = {}
-
-    def apply(scope: ast.AST, names: dict[str, str], class_models: dict[str, str]) -> None:
-        for inner in ast.walk(scope):
-            context.setdefault(id(inner), {"locals": names, "class": class_models})
+    out: list[tuple[int, int, int, str, dict, dict]] = []
 
     for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
         declared = _declared_model(cls, models)
@@ -226,22 +257,45 @@ def scopes(tree: ast.AST, models: set[str]) -> dict[int, dict[str, Any]]:
         )
         if declared and not overrides:
             class_models["inherited_queryset"] = declared
-        for function in [n for n in ast.walk(cls)
-                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-            apply(function, locals_in(function, models), class_models)
-        apply(cls, {}, class_models)
+        if not class_models:
+            continue
+        end_line = cls.end_lineno or cls.lineno
+        out.append((end_line - cls.lineno, cls.lineno, end_line, "class", {}, class_models))
 
-    for function in [n for n in ast.walk(tree)
-                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-        apply(function, locals_in(function, models), {})
+    for fn in [n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        end_line = fn.end_lineno or fn.lineno
+        out.append((end_line - fn.lineno, fn.lineno, end_line, "function",
+                    locals_in(fn, models), {}))
 
-    apply(tree, locals_in(tree, models), {})
-    return context
+    out.append((10 ** 9, 0, 10 ** 9, "module", locals_in(tree, models), {}))
+    out.sort(key=lambda entry: entry[0])
+    return out
 
 
-def context_for(context: dict[int, dict[str, Any]], node: ast.AST) -> tuple[
-    dict[str, str], dict[str, str]
-]:
-    """The (locals, class models) pair for one node."""
-    found = context.get(id(node)) or {}
-    return found.get("locals") or {}, found.get("class") or {}
+def context_for(
+    spans: list[tuple[int, int, int, str, dict, dict]], node: ast.AST
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The (locals, class models) in force where this node appears.
+
+    Spans are sorted smallest first, so the first one containing the line is
+    the innermost. The locals come from the innermost function - or the module
+    if the node is not in one - and the class models from the innermost class,
+    because a method's span carries locals and its class's carries
+    `self.model`.
+    """
+    line = getattr(node, "lineno", None)
+    if line is None:
+        return {}, {}
+    names: dict[str, str] | None = None
+    class_models: dict[str, str] | None = None
+    for _span, start, end, kind, local, klass in spans:
+        if not (start <= line <= end):
+            continue
+        if names is None and kind in {"function", "module"}:
+            names = local
+        if class_models is None and kind == "class":
+            class_models = klass
+        if names is not None and class_models is not None:
+            break
+    return names or {}, class_models or {}

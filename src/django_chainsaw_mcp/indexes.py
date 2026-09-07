@@ -26,6 +26,7 @@ from typing import Any
 
 from . import querysets
 from .django_env import ensure_django
+from .project import parse_file, read_source
 
 _LOOKUP_METHODS = {"filter", "exclude", "get", "order_by", "values", "values_list",
                    "get_or_create", "update_or_create", "distinct"}
@@ -169,8 +170,8 @@ def missing_indexes(
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         try:
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source)
+            source = read_source(path)
+            tree = parse_file(path)
         except (OSError, SyntaxError):
             continue
 
@@ -181,7 +182,15 @@ def missing_indexes(
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            names, class_models = querysets.context_for(context, node)
+            # Only a chain that bottoms out at a name or at `self` can be
+            # changed by the scope, and the lookup was being paid for every
+            # call node in the project - hundreds of thousands of them,
+            # almost none a queryset. That was 30 of the 51 seconds
+            # `aggregates` took on a real codebase.
+            names, class_models = (
+                querysets.context_for(context, node)
+                if querysets.needs_context(node) else ({}, {})
+            )
             result = _unwind(node, set(by_class), names, class_models)
             if result is None:
                 continue

@@ -5,6 +5,39 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A full `check` is 26.6 s instead of 35.6 s on the benchmark project.**
+  Twenty checks each read and parsed the same files. One pass over 2144 files
+  is 5.4 seconds and a full `ast.walk` over the result is 1.5, so the parsing
+  was the expensive half; `read_source` and `parse_file` in `project` now cache
+  by path, mtime and size, and `check` enables that for its run.
+- **The cache is off by default, because the first version of it was a
+  regression.** Caching unconditionally cost 315 MB for a single subcommand
+  that reads each file once, and the benchmark said what that costs: `check`
+  went to 78 s and every single-pass command got two to three times slower.
+  It is opt-in now, and only `check` opts in.
+- **The shared queryset resolver no longer walks each scope separately.** It
+  mapped every node id to its enclosing scope, which meant a node inside a
+  nested function was visited once per enclosing scope. On a real codebase
+  that had taken `aggregates` from 22 s to 66 s and `choices` from 20 s to 61
+  s. A line-span index gives the same answer for one walk per function body.
+- The scope lookup is only performed for a chain that could be changed by it -
+  one bottoming out at a bare name or at `self`. It was being paid for every
+  call node in the project, and almost none of them is a queryset.
+- `callgraph` uses the fingerprint helper in `project` instead of its own copy.
+
+### Fixed
+
+- **A function with no queryset locals was indistinguishable from one with no
+  scope at all**, so the module's locals applied inside it - which is how a
+  `qs` in one function came to resolve to another function's model. Caught by
+  the regression test for exactly that case.
+- `docs/performance.md` quoted 338 seconds for a real project from a wall-clock
+  measurement on a shared machine, where the same code ranged from 172 to 326
+  seconds across runs. It now quotes CPU time and says plainly that the figure
+  is an order of magnitude rather than a measurement.
+
 
 ## [0.1.0] - 2026-09-07
 

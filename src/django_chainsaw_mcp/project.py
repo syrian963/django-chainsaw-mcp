@@ -204,6 +204,130 @@ def resolve_root(search_path: str | None = None, *, need_django: bool = False) -
     return root
 
 
+def fingerprint(root: Path) -> tuple[int, float, int]:
+    """How many files, how recent, how large - enough to notice an edit.
+
+    Stat-only, so it costs a fraction of a parse. The newest mtime alone is
+    not enough: an edit within the same clock tick that leaves the length
+    unchanged is exactly the case that bit this project once already, through
+    Python's own bytecode cache. The total size catches the ordinary version
+    of that.
+    """
+    count = 0
+    newest = 0.0
+    total = 0
+    for path in root.rglob("*.py"):
+        if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        count += 1
+        total += info.st_size
+        newest = max(newest, info.st_mtime)
+    return (count, newest, total)
+
+
+# One read and one parse per file, for the whole process.
+#
+# Twenty checks walk the project's Python files, and every one of them used to
+# read and parse the tree itself. Measured on a codebase of 2144 files that is
+# 5.4 seconds per pass, so roughly 108 of the 338 seconds a full `check` took
+# were the same files being parsed twenty times over. One full `ast.walk` over
+# all of them, by contrast, is 1.5 seconds - the parsing was the expensive
+# half, not the analysis.
+#
+# The trade is memory: holding every tree costs 315 MB on that project. For a
+# tool that has already booted Django and 424 models, that is the cheaper side
+# of the deal.
+#
+# `read_source` and `parse_file` keep the signatures and the exceptions of the
+# code they replace - OSError from a read, SyntaxError from a parse - so a
+# caller's existing try/except still does exactly what it did.
+# Off by default, and that is the whole design.
+#
+# A single CLI subcommand reads each file once. Retaining every tree for it
+# buys nothing and costs 315 MB, and the benchmark said so plainly: holding
+# the trees unconditionally took `check` from 35.6 s to 78 s and made every
+# single-pass command two to three times slower. Allocation and garbage
+# collection pressure is not free.
+#
+# So the cache is opt-in, and the two callers that ask many questions about
+# one unchanged tree turn it on: `check`, which runs twenty analyses, and the
+# MCP server, which answers for as long as it is running.
+_caching = False
+_read: dict[tuple[str, int, int], str] = {}
+_parsed: dict[tuple[str, int, int], Any] = {}
+
+
+def _key(path: Path) -> tuple[str, int, int] | None:
+    """Identity of a file's current contents, or None if it cannot be stat'ed.
+
+    A stat is microseconds against a parse's milliseconds, so paying it on
+    every call is what makes the cache safe to use from a long-lived server:
+    an edited file has a different key and is read again.
+    """
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return (str(path), info.st_mtime_ns, info.st_size)
+
+
+def enable_source_cache() -> None:
+    """Keep every file read and parsed from here on. For many passes over one tree."""
+    global _caching
+    _caching = True
+
+
+def disable_source_cache() -> None:
+    """Stop retaining, and drop what is held."""
+    global _caching
+    _caching = False
+    clear_source_cache()
+
+
+def read_source(path: Path) -> str:
+    """The file's text. Raises OSError exactly as `read_text` does."""
+    if not _caching:
+        return path.read_text(encoding="utf-8", errors="replace")
+    key = _key(path)
+    if key is None:
+        return path.read_text(encoding="utf-8", errors="replace")
+    if key not in _read:
+        _read[key] = path.read_text(encoding="utf-8", errors="replace")
+    return _read[key]
+
+
+def parse_file(path: Path) -> Any:
+    """The parsed module. Raises OSError or SyntaxError exactly as before.
+
+    A file that failed to parse is not cached as a failure: the exception is
+    what the caller expects, and re-raising a stored one would lose its
+    traceback.
+    """
+    if not _caching:
+        return ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    key = _key(path)
+    source = read_source(path)
+    if key is None:
+        return ast.parse(source)
+    if key not in _parsed:
+        _parsed[key] = ast.parse(source)
+    return _parsed[key]
+
+
+def clear_source_cache() -> None:
+    """Forget every cached file. For tests, and for a long-lived server."""
+    _read.clear()
+    _parsed.clear()
+
+
+def source_cache_size() -> dict[str, int]:
+    return {"files_read": len(_read), "files_parsed": len(_parsed)}
+
+
 class TreeCache:
     """One parse per file, with its function definitions indexed.
 

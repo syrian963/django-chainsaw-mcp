@@ -10,39 +10,39 @@ times the commands against it.
 
 | Command | Time |
 | --- | --- |
-| `models --short` | 1.8 s |
-| `deploy-safety` | 2.0 s |
-| `datetimes` | 3.1 s |
-| `tenancy` | 4.0 s |
-| `indexes` | 4.1 s |
-| `explain` one model | 8.7 s |
-| `check` (everything) | **35.6 s** |
+| `models --short` | 1.9 s |
+| `datetimes` | 2.1 s |
+| `deploy-safety` | 2.1 s |
+| `indexes` | 4.4 s |
+| `tenancy` | 4.9 s |
+| `explain` one model | 8.3 s |
+| `check` (everything) | **26.6 s** |
 
 ```bash
 bash benchmark.sh 60 25 45      # apps, models per app, view modules per app
 ```
 
-**That last number was 5.4 seconds when there were ten checks.** There are
-twenty-one now, and a full run costs what twenty-one analyses of 2822 files
-cost. Half a minute is still fine in CI and borderline at a terminal, which is
-what `--only` and `--skip` are for.
+**That last number was 5.4 seconds when there were ten checks, and 35.6 when
+there were twenty-one.** It is 26.6 now because the twenty-one no longer parse
+the same files twenty-one times over - see the cache section below.
 
 ### The generated project is kinder than a real one
 
-The numbers above come from `benchmark.sh`, which writes 2822 uniform files.
-Run against a real codebase of 2120 files and 424 models, a full `check` took
-**338 seconds** rather than 35.
+The numbers above come from `benchmark.sh`, which writes 2822 uniform files
+with shallow call graphs, few relations per model and no inheritance worth the
+name. Real code has all three, and the checks that walk a call graph pay for
+it.
 
-The generated project has shallow call graphs, few relations per model and no
-inheritance to speak of. Real code has all three, and the checks that walk a
-call graph pay for it. So read the 35 seconds as the floor for a project of
-that size and the 338 as what a mature one costs, and use `--only` or `--skip`
-if that matters at a terminal. In CI it is a coffee, not a problem.
+Measured against a real codebase of 2120 files and 424 models, a full `check`
+cost about **270 seconds of CPU time**, and individual checks 10 to 17 seconds
+each once the tree was parsed.
 
-The per-check numbers on that real project, in the same process so Django boots
-once: `dangling` 26 s, `async` 24 s, `aggregates` 22 s, `n+1-serializer` 21 s,
-`choices` 20 s. One full read and parse of that tree is 3.2 s, so parsing is
-about a quarter of the total and the rest is the analysis itself.
+That number carries a caveat worth stating rather than hiding: the only real
+project available for this was a shared machine with other work on it, and
+wall-clock times there ranged from 172 to 326 seconds across runs of the same
+code. Wall clock on a contended box measures the box. The benchmark above is
+the repeatable figure and the one to compare releases against; treat the 270
+seconds as an order of magnitude, not a measurement.
 
 ### Where the half minute goes
 
@@ -134,6 +134,29 @@ everything looks fast and nothing looks wrong.
 Almost all of it is `ast.parse` on every Python file. There is no way around
 reading the source, and the AST is what makes the analysis precise rather than
 a text search, which is a trade already made deliberately in `deploy_safety`.
+
+### The parse cache, and why it is off by default
+
+Twenty checks walk the project's Python files, and every one of them used to
+read and parse the tree itself. One full read and parse of 2144 files is 5.4
+seconds, so about a fifth of a `check` run was the same files being parsed
+twenty times over. One full `ast.walk` over all of them, by contrast, is 1.5
+seconds - the parsing was the expensive half, not the analysis.
+
+So `read_source` and `parse_file` in `project.py` cache by path, mtime and
+size, and `check` turns that on for the duration of its run: 35.6 s to 26.6 s
+on the benchmark.
+
+**It is off by default, and the benchmark is why.** The first version cached
+unconditionally. A single subcommand reads each file exactly once, so
+retaining every tree bought it nothing and cost 315 MB, and the measurement
+was unambiguous: `check` went from 35.6 s to **78 s** and every single-pass
+command got two to three times slower. Allocation and garbage collection are
+not free, and a cache that is never read is pure cost.
+
+That regression only showed up because the benchmark is repeatable. The
+first numbers came from the contended machine above, where it would have been
+invisible.
 
 ### Two caches, and only one of them is for the server
 
