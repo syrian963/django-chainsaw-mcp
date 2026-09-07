@@ -321,7 +321,7 @@ def what_happens_on(
                 if not target_label or target_label == label:
                     continue
                 walk(apps.get_model(target_label), depth + 1,
-                     path + [f"{label_text} -> {target_label}"])
+                     [*path, f"{label_text} -> {target_label}"])
 
         for signal_name in wanted:
             signal = getattr(django_signals, signal_name, None)
@@ -343,7 +343,7 @@ def what_happens_on(
                     if not target_label or target_label == label:
                         continue
                     child = apps.get_model(target_label)
-                    walk(child, depth + 1, path + [f"{described['receiver']} -> {target_label}"])
+                    walk(child, depth + 1, [*path, f"{described['receiver']} -> {target_label}"])
 
     walk(root, 0, [root._meta.label])
 

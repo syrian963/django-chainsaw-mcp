@@ -29,8 +29,6 @@ looks completely innocent.
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
 from typing import Any
 
 from .discovery import load_serializer_modules, load_view_modules

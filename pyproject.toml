@@ -7,9 +7,35 @@ authors = [
     { name = "Mohammad Alsakka", email = "mnouralsakka@gmail.com" }
 ]
 requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE"]
+keywords = [
+    "django", "mcp", "static-analysis", "n+1", "orm",
+    "migrations", "code-review", "drf", "fastapi",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Framework :: Django",
+    "Framework :: Django :: 5.0",
+    "Framework :: Django :: 6.0",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 dependencies = [
     "mcp[cli]>=2.1.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/syrian963/django-chainsaw-mcp"
+Documentation = "https://github.com/syrian963/django-chainsaw-mcp/tree/main/docs"
+Repository = "https://github.com/syrian963/django-chainsaw-mcp"
+Issues = "https://github.com/syrian963/django-chainsaw-mcp/issues"
+Changelog = "https://github.com/syrian963/django-chainsaw-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 django-chainsaw = "django_chainsaw_mcp.cli:main"
@@ -25,8 +51,34 @@ dev = [
     "djangorestframework>=3.18.0",
     "pytest>=9.1.1",
     "requests>=2.34.2",
+    "ruff>=0.16.6",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Correctness and clarity rules. PTH is left out on purpose: `open()` in a
+# short script is not a defect, and rewriting it buys nothing. SIM is left out
+# because several of its rules argue about taste in code whose shape is
+# deliberate - a collapsible `if` often reads better split when each branch
+# carries its own comment.
+select = ["E", "F", "W", "I", "UP", "B", "C4", "RET", "RUF"]
+ignore = [
+    # A finding's `why` and `fix` text is the product here, and it reads
+    # better as one long f-string than as a joined list.
+    "E501",
+    # The checks catch broad exceptions on purpose: a target project that
+    # cannot be imported is an answer to report, not a crash to propagate.
+    "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The fixtures are deliberately wrong code. Linting them would mean fixing
+# the very defects the tests assert on.
+"testprojects/**" = ["ALL"]

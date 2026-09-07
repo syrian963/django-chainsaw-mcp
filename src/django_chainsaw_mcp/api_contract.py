@@ -29,7 +29,7 @@ The classification is where the value is. Not every change is equal:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -179,7 +179,7 @@ def contract(max_depth: int = 3) -> dict[str, Any]:
 
     return {
         "rest_framework_installed": True,
-        "captured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "captured_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "serializer_count": len(captured),
         "serializers": captured,
         "unreadable": unreadable,

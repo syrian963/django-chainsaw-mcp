@@ -40,7 +40,6 @@ the deploy is a better time.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import Any
 
 from .project import resolve_root
@@ -261,7 +260,7 @@ def _model_class_names() -> set[str]:
         from django.apps import apps
 
         return {model.__name__ for model in apps.get_models()}
-    except Exception:  # noqa: BLE001 - not a Django project, or not booted
+    except Exception:
         return set()
 
 

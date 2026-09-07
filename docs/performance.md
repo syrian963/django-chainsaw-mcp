@@ -27,6 +27,23 @@ twenty-one now, and a full run costs what twenty-one analyses of 2822 files
 cost. Half a minute is still fine in CI and borderline at a terminal, which is
 what `--only` and `--skip` are for.
 
+### The generated project is kinder than a real one
+
+The numbers above come from `benchmark.sh`, which writes 2822 uniform files.
+Run against a real codebase of 2120 files and 424 models, a full `check` took
+**338 seconds** rather than 35.
+
+The generated project has shallow call graphs, few relations per model and no
+inheritance to speak of. Real code has all three, and the checks that walk a
+call graph pay for it. So read the 35 seconds as the floor for a project of
+that size and the 338 as what a mature one costs, and use `--only` or `--skip`
+if that matters at a terminal. In CI it is a coffee, not a problem.
+
+The per-check numbers on that real project, in the same process so Django boots
+once: `dangling` 26 s, `async` 24 s, `aggregates` 22 s, `n+1-serializer` 21 s,
+`choices` 20 s. One full read and parse of that tree is 3.2 s, so parsing is
+about a quarter of the total and the rest is the analysis itself.
+
 ### Where the half minute goes
 
 Each check on its own, on the same project. Every one of these includes about

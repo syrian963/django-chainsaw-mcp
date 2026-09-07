@@ -104,7 +104,7 @@ def load_serializer_modules(root: Path) -> dict[str, Any]:
         try:
             importlib.import_module(module)
             imported.append(module)
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        except Exception as exc:
             failed.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})
 
     result = {
@@ -255,7 +255,7 @@ def load_view_modules(root: Path) -> dict[str, Any]:
         try:
             importlib.import_module(module)
             imported.append(module)
-        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        except Exception as exc:
             failed.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})
 
     _loaded_views[key] = {"imported": imported, "failed": failed}

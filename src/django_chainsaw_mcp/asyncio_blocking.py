@@ -394,7 +394,7 @@ def _reaches_blocking(
             if callee in seen:
                 continue
             seen.add(callee)
-            next_path = path + [callee]
+            next_path = [*path, callee]
             if callee in blocking:
                 out.append((callee, next_path))
             queue.append((callee, next_path))

@@ -180,7 +180,7 @@ def _serializer_fixes(report: dict[str, Any], root: Path) -> list[Fix]:
                 kind=ADVISORY if sensitive else GENERATED,
                 check="serializers",
                 title=f"{finding['serializer']}: replace {mode} with an explicit list",
-                old=f"fields = \"__all__\"" if mode == "__all__" else f"{mode}",
+                old="fields = \"__all__\"" if mode == "__all__" else f"{mode}",
                 new=suggested.replace("list the fields explicitly: ", ""),
                 why=(
                     "An explicit list stops the next migration widening the API "
@@ -321,8 +321,10 @@ def _tenancy_fixes(report: dict[str, Any], root: Path) -> list[Fix]:
             scope = f"{request_name}.user"
             replaced = re.sub(
                 r"\.objects\.(all\(\)|filter\(|get\(|exclude\()",
+                # re.sub calls this immediately, so owner_path and scope
+                # still hold this iteration's values.
                 lambda m: (
-                    f".objects.filter({owner_path}={scope})"
+                    f".objects.filter({owner_path}={scope})"  # noqa: B023
                     + ("" if m.group(1) == "all()" else f".{m.group(1)}")
                 ),
                 original,

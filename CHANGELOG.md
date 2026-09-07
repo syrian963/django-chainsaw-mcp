@@ -5,6 +5,46 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+
+## [0.1.0] - 2026-09-07
+
+The first release. 21 checks in the aggregate run, 36 MCP tools, 33 CLI
+subcommands, 199 tests across 16 suites, and a documentation page per check
+that states what that check cannot see.
+
+Everything below this heading is the history of getting there, newest first.
+
+### Release preparation
+
+- `license`, `classifiers`, `keywords` and `[project.urls]` in
+  `pyproject.toml`. Without them a published package has no license shown and
+  no links anywhere.
+- **ruff, and a lint gate in CI.** The first run found 122 findings, and three
+  of them were real:
+  - `endpoint_cost` referenced `views_seen` and `endpoints` in its early-return
+    branch, where neither exists yet. That branch is the "no DRF views are
+    importable" path, so the message written for the case where the tool cannot
+    see anything raised `NameError` instead of explaining itself.
+  - The sentence about views that declare no `serializer_class` was in that
+    same dead branch and therefore missing from the report that needed it. On a
+    real project 152 of the views declare none, so a near-empty result was
+    reading as a clean one. It is in the main note now, with the count.
+  - Two `discovered = load_serializer_modules(...)` results were assigned and
+    never used, so a serializer module that failed to import was silently
+    dropped from the analysis. Both are reported now.
+- A sentence in `endpoint_cost`'s own output had been broken by an earlier edit
+  and read as two half-clauses. Repaired.
+- **A trust section at the top of the README.** The tool imports the target
+  project, which means import-time side effects in that project run. That
+  belongs above the fold, not in a note halfway down `usage.md`. It also says
+  what the tool does not do: never runs a view or a task, reads the database
+  only to ask which migrations are applied, writes files only when asked, and
+  makes no network calls.
+- `docs/performance.md` carries the cost on a real codebase, not only on the
+  generated one: 338 s for a full `check` on 2120 files and 424 models, against
+  35 s on the synthetic project of similar size. The generated project has
+  shallow call graphs and the checks that walk one pay for that difference.
+
 ### Added
 
 - **`multiplied_aggregates`: counts and sums a join has multiplied.**

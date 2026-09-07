@@ -101,7 +101,7 @@ def _multi_valued_root(model: Any, path: str, cache: dict[tuple[str, str], str |
     if key not in cache:
         try:
             field = model._meta.get_field(root)
-        except Exception:  # noqa: BLE001 - not a field: an annotation alias, a transform
+        except Exception:
             cache[key] = None
         else:
             multi = bool(getattr(field, "many_to_many", False)

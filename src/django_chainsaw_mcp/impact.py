@@ -141,13 +141,13 @@ def _routed(graph: CallGraph) -> dict[str, dict[str, Any]]:
     """
     try:
         from django.urls import get_resolver
-    except Exception:  # noqa: BLE001 - not a Django project
+    except Exception:
         return {}
 
     try:
         resolver = get_resolver()
         patterns = resolver.url_patterns
-    except Exception:  # noqa: BLE001 - no ROOT_URLCONF, or it does not import
+    except Exception:
         return {}
 
     found: dict[str, dict[str, Any]] = {}
@@ -188,7 +188,7 @@ def _routed(graph: CallGraph) -> dict[str, dict[str, Any]]:
 
     try:
         walk(patterns, "", 0)
-    except Exception:  # noqa: BLE001 - a URLconf that raises is not a crash here
+    except Exception:
         return found
     return found
 
@@ -425,7 +425,7 @@ def _serializer_map(root: Path) -> tuple[dict[str, list[str]], str | None]:
         from .discovery import serializers_used_by_views
 
         return serializers_used_by_views(root), None
-    except Exception as exc:  # noqa: BLE001 - no DRF, or no settings
+    except Exception as exc:
         # An empty map and a map that could not be built look identical from
         # the outside, and one of them means "nothing to attribute" while the
         # other means "could not look". Saying which is the difference between

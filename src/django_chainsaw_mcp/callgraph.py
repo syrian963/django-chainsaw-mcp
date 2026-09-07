@@ -43,9 +43,10 @@ answer.
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
@@ -201,7 +202,7 @@ class CallGraph:
                 # showing a human.
                 if callee in path:
                     continue
-                paths[callee] = path + [callee]
+                paths[callee] = [*path, callee]
                 queue.append((callee, paths[callee]))
 
         return paths

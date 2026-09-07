@@ -68,7 +68,7 @@ def _django_side(tenant_hint: str | None = None) -> tuple[dict[str, Any], dict[s
                 open_views.setdefault(finding["view"], {})["exposes"] = finding.get(
                     "sensitive_fields"
                 ) or []
-    except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+    except Exception as exc:
         problems.append(f"open_endpoints: {type(exc).__name__}: {exc}")
 
     try:
@@ -77,7 +77,7 @@ def _django_side(tenant_hint: str | None = None) -> tuple[dict[str, Any], dict[s
         report = endpoint_cost()
         for endpoint in report.get("endpoints", []):
             costs[endpoint["view"]] = endpoint
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         problems.append(f"endpoint_cost: {type(exc).__name__}: {exc}")
 
     return open_views, costs, problems
@@ -100,7 +100,7 @@ def _fastapi_side(root: Any) -> tuple[dict[str, Any], dict[str, list[dict[str, A
             if entry["authenticated"]:
                 continue
             routes[entry["endpoint"]] = entry
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         problems.append(f"fastapi_exposure: {type(exc).__name__}: {exc}")
 
     try:
@@ -109,7 +109,7 @@ def _fastapi_side(root: Any) -> tuple[dict[str, Any], dict[str, list[dict[str, A
         report = sqlalchemy_nplusone(search_path=str(root))
         for finding in report.get("in_loops", []) + report.get("in_response_models", []):
             per_row.setdefault(finding["function"], []).append(finding)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         problems.append(f"sqlalchemy_nplusone: {type(exc).__name__}: {exc}")
 
     return routes, per_row, problems

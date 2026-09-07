@@ -312,18 +312,10 @@ def endpoint_cost(
         return {
             "rest_framework_installed": False,
             "endpoints": [],
+            "views_seen": 0,
             "note": (
-            (
-                f"{views_seen} view(s) were found and none of them declares a "
-                "serializer_class, so there was nothing to estimate. This "
-                "estimate works from a view's serializer and its queryset; a "
-                "view that builds its response by hand is invisible to it. An "
-                "empty result here means 'could not look', not 'nothing to "
-                "find'.\n\n"
-                if views_seen and not endpoints else ""
-            ) +
-                "No DRF view classes are importable. If the project uses DRF, "
-                "the server is running in the wrong environment; see "
+                "No DRF view classes are importable. If the project uses "
+                "DRF, the server is running in the wrong environment; see "
                 "docs/usage.md."
             ),
         }
@@ -579,5 +571,22 @@ def endpoint_cost(
             "your data that no amount of reading the code reveals. The ratio "
             "between an optimised and an unoptimised view is reliable; the "
             "absolute number is only as good as that assumption."
+            # The case that actually happens on a large codebase: plenty of
+            # views, almost none of them declaring a serializer_class.
+            # Without this sentence a near-empty result reads as a clean one.
+            + (
+                f"\n\n{views_without_serializer} of the {views_seen} view(s) found declare no "
+                "serializer_class. This estimate works from a view's serializer "
+                "and its queryset, so a view that builds its response by hand "
+                "is invisible here: for those an empty result means 'could not "
+                "look', not 'nothing to find'."
+                if views_without_serializer else ""
+            )
+            + (
+                f"\n\n{len(discovered['failed'])} module(s) declaring a serializer could "
+                "not be imported, so nothing in them was read: "
+                + ", ".join(entry["module"] for entry in discovered["failed"][:5])
+                if discovered["failed"] else ""
+            )
         ),
     }

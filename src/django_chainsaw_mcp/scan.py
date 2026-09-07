@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from .django_env import ensure_django
 from .nplusone import analyse_template, set_include_search_dirs
@@ -117,7 +117,9 @@ class _RenderVisitor(ast.NodeVisitor):
     the values are ordinary queryset chains.
     """
 
-    _RENDERERS = {"render", "TemplateResponse", "render_to_response"}
+    _RENDERERS: ClassVar[set[str]] = {
+        "render", "TemplateResponse", "render_to_response",
+    }
 
     def __init__(self) -> None:
         # template name -> {context variable: model class name}
@@ -147,7 +149,7 @@ class _RenderVisitor(ast.NodeVisitor):
 
     def _read_dict(self, node: ast.Dict) -> dict[str, str]:
         out: dict[str, str] = {}
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=True):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             model = _model_of(value, self._locals)
@@ -266,7 +268,7 @@ def scan_templates(
 
         try:
             report = analyse_template(str(path), context)
-        except Exception as exc:  # noqa: BLE001 - one bad template is not a failed run
+        except Exception as exc:
             unreadable.append({
                 "template": str(path.relative_to(templates_dir)),
                 "error": f"{type(exc).__name__}: {exc}".split("\n")[0][:200],

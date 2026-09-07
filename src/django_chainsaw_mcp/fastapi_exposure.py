@@ -34,11 +34,10 @@ from __future__ import annotations
 
 import ast
 import re
-from pathlib import Path
 from typing import Any
 
 from .project import get_profile, resolve_root
-from .serializers import _SENSITIVE  # noqa: PLC2701 - one list of names, shared
+from .serializers import _SENSITIVE
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
@@ -249,7 +248,7 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
     inventory: list[dict[str, Any]] = []
     routes = 0
 
-    for relative, (tree, lines) in sorted(trees.items()):
+    for relative, (tree, _lines) in sorted(trees.items()):
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

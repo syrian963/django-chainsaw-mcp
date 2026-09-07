@@ -32,7 +32,7 @@ class BootConfig:
     settings_module: str
 
     @classmethod
-    def from_env(cls) -> "BootConfig":
+    def from_env(cls) -> BootConfig:
         raw_path = os.environ.get(PROJECT_PATH_VAR)
         settings_module = os.environ.get(SETTINGS_MODULE_VAR)
 

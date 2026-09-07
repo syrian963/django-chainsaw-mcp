@@ -244,6 +244,9 @@ def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
     return {
         "rest_framework_installed": True,
         "serializer_count": len(roots),
+        # A serializer in a module that would not import was not read, and a
+        # smaller count is not a cleaner project.
+        "serializer_modules_unreadable": [entry["module"] for entry in discovered["failed"]],
         "finding_count": len(findings),
         "high_severity_count": sum(1 for f in findings if f["severity"] == "high"),
         "findings": findings,

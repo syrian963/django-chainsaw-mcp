@@ -220,7 +220,7 @@ def _unique_sets(model: Any) -> list[frozenset[str]]:
 
 
 def _upsert_findings(tree: ast.AST, relative: str, lines: list[str], by_class: dict[str, Any]) -> list[dict[str, Any]]:
-    from .tenancy import _unwind  # noqa: PLC2701 - the queryset-chain reader
+    from .tenancy import _unwind
 
     out: list[dict[str, Any]] = []
     for node in ast.walk(tree):
@@ -326,8 +326,10 @@ def race_conditions(
         lines = source.splitlines()
         relative = str(path.relative_to(root))
 
+        # Called inside this same iteration, so the late binding B023
+        # warns about cannot happen here.
         def code(line: int) -> str:
-            return lines[line - 1].strip()[:160] if line <= len(lines) else ""
+            return lines[line - 1].strip()[:160] if line <= len(lines) else ""  # noqa: B023
 
         upserts.extend(_upsert_findings(tree, relative, lines, by_class))
 

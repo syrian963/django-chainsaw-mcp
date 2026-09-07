@@ -179,7 +179,7 @@ def set_include_search_dirs(dirs: list[Path]) -> None:
 def _load_included(name: str) -> Any:
     try:
         return _project_engine().get_template(name)
-    except Exception:  # noqa: BLE001 - fall through to the search path
+    except Exception:
         pass
     for directory in _SEARCH_DIRS:
         candidate = directory / name
@@ -188,7 +188,7 @@ def _load_included(name: str) -> Any:
                 return _project_engine().from_string(
                     candidate.read_text(encoding="utf-8", errors="replace")
                 )
-            except Exception:  # noqa: BLE001 - an unparsable partial is not a failure
+            except Exception:
                 return None
     return None
 
@@ -208,7 +208,7 @@ def _walk_include(
     scope, because that is exactly what `only` means, and `with x=y` rebinds
     what it names.
     """
-    from django.template.base import Variable, VariableDoesNotExist
+    from django.template.base import Variable
 
     if depth >= _MAX_INCLUDE_DEPTH:
         return
@@ -269,7 +269,7 @@ def _project_engine() -> Any:
             return backend.engine
     try:
         return Engine.get_default()
-    except Exception:  # noqa: BLE001 - no DjangoTemplates backend configured
+    except Exception:
         return Engine(debug=False)
 
 

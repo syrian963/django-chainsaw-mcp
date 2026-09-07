@@ -79,6 +79,8 @@ def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]
     config = ensure_django()
 
     try:
+        # The import has to run, not merely resolve: DRF needs Django
+        # configured, and find_spec would say yes to a broken install.
         import rest_framework  # noqa: F401
     except ModuleNotFoundError:
         return {

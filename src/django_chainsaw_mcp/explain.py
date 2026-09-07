@@ -43,7 +43,7 @@ def _safe(fn, **kwargs) -> dict[str, Any]:
     """Never let one analyser failing take the whole picture down."""
     try:
         return fn(**kwargs)
-    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+    except Exception as exc:
         return {"unavailable": f"{type(exc).__name__}: {exc}"}
 
 

@@ -40,6 +40,32 @@ the repository would break every link to it. That is not true — GitHub
 permanently redirects a renamed repository — and it was the wrong reason for
 the right conclusion. The name stays because it is accurate.
 
+## What it runs, and what it does not
+
+Read this before pointing it at a codebase.
+
+**It imports the target project.** `django.setup()` imports your settings and
+every app in `INSTALLED_APPS`, and the checks additionally import the modules
+that declare serializers, views and URLs. Anything those modules do at import
+time therefore happens: a module-level API call happens, a connection opened in
+`apps.py` is opened. That is not a design choice this can avoid - the app
+registry is where the answers are - but it does mean **do not point this at code
+you would not run**.
+
+**It does not run your application.** No view is called, no task is dispatched,
+no management command is executed.
+
+**One check reads the database, read-only.** `migrations` and `deploy-safety`
+ask Django's own `MigrationLoader` which migrations are applied, which reads the
+`django_migrations` table. Nothing else opens a connection, and nothing writes
+to your database. No migration is applied and no row is touched.
+
+**It writes files only when you ask.** `fix --write` edits your source, and only
+the mechanical class of fix. A baseline, an API-contract snapshot and `--sarif`
+each write where you tell them to. Otherwise nothing is written.
+
+**Nothing leaves the machine.** No network calls, no telemetry, no uploads.
+
 ## One command to try it
 
 ```bash

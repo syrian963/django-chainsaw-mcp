@@ -319,13 +319,12 @@ def test_the_on_commit_version_of_the_same_call_is_silent():
     # four calls. Reporting the second one is the failure mode that gets a
     # check switched off, so it matters more than finding the first.
     import ast
-    import io
     from pathlib import Path
 
     from django_chainsaw_mcp.django_env import ensure_django
 
     root = Path(ensure_django().project_path)
-    source = io.open(root / "shop" / "notifications.py", encoding="utf-8").read()
+    source = open(root / "shop" / "notifications.py", encoding="utf-8").read()
     spans = {
         node.name: (node.lineno, node.end_lineno)
         for node in ast.walk(ast.parse(source))
@@ -523,13 +522,12 @@ def test_only_does_not_blame_fields_it_could_never_have_fetched():
 
 def _scoped_py_spans():
     import ast
-    import io
     from pathlib import Path
 
     from django_chainsaw_mcp.django_env import ensure_django
 
     root = Path(ensure_django().project_path)
-    source = io.open(root / "shop" / "scoped.py", encoding="utf-8").read()
+    source = open(root / "shop" / "scoped.py", encoding="utf-8").read()
     return {
         node.name: (node.lineno, node.end_lineno)
         for node in ast.walk(ast.parse(source))
@@ -854,9 +852,10 @@ def _scan():
 def test_a_function_view_supplies_context_in_all_the_usual_shapes():
     # Most Django views are written this way. On a real project the
     # class-based reader alone resolved 28 templates out of 2181.
+    from pathlib import Path
+
     from django_chainsaw_mcp.django_env import ensure_django
     from django_chainsaw_mcp.scan import _view_context_map
-    from pathlib import Path
 
     mapping = _view_context_map(Path(ensure_django().project_path))
     assert mapping["shop/render_order_list.html"] == {"orders": "shop.Order"}
@@ -866,9 +865,10 @@ def test_a_function_view_supplies_context_in_all_the_usual_shapes():
 
 
 def test_a_runtime_built_template_name_is_not_guessed_at():
+    from pathlib import Path
+
     from django_chainsaw_mcp.django_env import ensure_django
     from django_chainsaw_mcp.scan import _view_context_map
-    from pathlib import Path
 
     mapping = _view_context_map(Path(ensure_django().project_path))
     assert not any(name.endswith(".html}") or "{" in name for name in mapping)
@@ -1015,13 +1015,12 @@ def test_correctly_written_money_code_is_silent():
     _, report = _money()
     lines = {f.get("line") for f in report["findings"] if f.get("file", "").endswith("pricing.py")}
     import ast
-    import io
     from pathlib import Path
 
     from django_chainsaw_mcp.django_env import ensure_django
 
     root = Path(ensure_django().project_path)
-    tree = ast.parse(io.open(root / "shop" / "pricing.py", encoding="utf-8").read())
+    tree = ast.parse(open(root / "shop" / "pricing.py", encoding="utf-8").read())
     spans = {
         n.name: (n.lineno, n.end_lineno)
         for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
@@ -1257,7 +1256,7 @@ def test_every_check_declares_what_it_needs():
     # A check missing from _REQUIRES silently defaults to "runs anywhere",
     # which is how a Django check ends up producing a boot error on a FastAPI
     # project instead of saying it does not apply.
-    from django_chainsaw_mcp.check import ALL_CHECKS, _REQUIRES
+    from django_chainsaw_mcp.check import _REQUIRES, ALL_CHECKS
 
     assert set(_REQUIRES) == set(ALL_CHECKS)
     assert set(_REQUIRES.values()) <= {"django", "fastapi", "sqlalchemy", "any"}
@@ -1350,7 +1349,7 @@ def test_a_bound_task_does_not_count_self_against_the_caller():
 
 
 def test_passing_the_identifier_and_using_keywords_are_both_silent():
-    instances, arity, report = _celery()
+    _instances, arity, report = _celery()
     # dispatch_correctly passes order.pk
     assert report["instance_argument_count"] == 3, report["instance_arguments"]
     # dispatch_by_keyword uses kwargs, which arity cannot judge
@@ -1371,7 +1370,6 @@ def test_a_dispatch_inside_a_nested_function_is_counted_once():
     # again as their own scope. On a real project that reported 11 dispatches
     # where the source has 10.
     import ast
-    import io
     from pathlib import Path
 
     from django_chainsaw_mcp.celery_tasks import celery_arguments
@@ -1383,7 +1381,7 @@ def test_a_dispatch_inside_a_nested_function_is_counted_once():
         if "__pycache__" in path.parts:
             continue
         try:
-            tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
+            tree = ast.parse(open(path, encoding="utf-8", errors="replace").read())
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
@@ -1438,13 +1436,12 @@ def _loops():
 
 def _loops_spans():
     import ast
-    import io
     from pathlib import Path
 
     from django_chainsaw_mcp.django_env import ensure_django
 
     root = Path(ensure_django().project_path)
-    tree = ast.parse(io.open(root / "shop" / "loops.py", encoding="utf-8").read())
+    tree = ast.parse(open(root / "shop" / "loops.py", encoding="utf-8").read())
     return {
         node.name: (node.lineno, node.end_lineno)
         for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
@@ -1790,7 +1787,6 @@ def _choices():
 def _at(name):
     """The line a fixture function's body starts on, by name."""
     import ast
-    from pathlib import Path
 
     from django_chainsaw_mcp.project import project_root
 
@@ -1859,8 +1855,9 @@ def test_a_comparison_that_names_no_model_is_silent():
 def test_a_string_literal_against_an_integer_field_is_not_a_typo():
     # Django coerces the value to the field's type, so filter(x="1") on an
     # IntegerField whose choices are 1 and 2 is correct code.
-    from django_chainsaw_mcp.choices import _literals
     import ast
+
+    from django_chainsaw_mcp.choices import _literals
 
     assert _literals(ast.parse("'1'", mode="eval").body) == ["1"]
     # and the check compares string forms, which is what runtime does
@@ -2108,12 +2105,13 @@ def test_the_report_says_how_much_of_the_source_it_could_resolve():
 # --- querysets: which model is this chain about ----------------------------
 
 
-def _resolve(source, models={"Booking"}):
+def _resolve(source, models=None):
     """Resolve every filter() in a snippet to its model."""
     import ast
 
     from django_chainsaw_mcp import querysets
 
+    models = models or {"Booking"}
     tree = ast.parse(source)
     context = querysets.scopes(tree, models)
     out = {}

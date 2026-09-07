@@ -300,7 +300,7 @@ def _model_class_names() -> set[str]:
         from django.apps import apps
 
         return {model.__name__ for model in apps.get_models()}
-    except Exception:  # noqa: BLE001 - not Django, or not booted
+    except Exception:
         return set()
 
 
@@ -368,7 +368,7 @@ def _reaches_query(
             if callee in seen:
                 continue
             seen.add(callee)
-            next_path = path + [callee]
+            next_path = [*path, callee]
             if callee in querying:
                 return callee, next_path
             queue.append((callee, next_path))

@@ -19,45 +19,45 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
+from .aggregates import multiplied_aggregates as _multiplied_aggregates
 from .amplification import amplification as _amplification
-from .asyncio_blocking import blocking_in_async as _blocking_in_async
-from .cascade import delete_impact as _delete_impact
-from .celery_tasks import celery_arguments as _celery_arguments
 from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
 from .api_contract import contract as _contract
 from .api_contract import diff as _contract_diff
 from .api_contract import load_snapshot as _load_contract
 from .api_contract import write_snapshot as _write_contract
+from .asyncio_blocking import blocking_in_async as _blocking_in_async
 from .bypass import bypassed_effects as _bypassed_effects
+from .cascade import delete_impact as _delete_impact
+from .celery_tasks import celery_arguments as _celery_arguments
 from .check import run_all as _run_all
+from .choices import choice_typos as _choice_typos
 from .concurrency import race_conditions as _race_conditions
-from .on_commit import escaping_side_effects as _escaping_side_effects
-from .endpoint_cost import endpoint_cost as _endpoint_cost
-from .suggest import suggest_fixes as _suggest_fixes
-from .serializer_nplusone import serializer_nplusone as _serializer_nplusone
-from .sqlalchemy_nplusone import sqlalchemy_nplusone as _sqlalchemy_nplusone
+from .dangling import dangling_references as _dangling_references
 from .datetimes import datetime_audit as _datetime_audit
 from .deploy_safety import deploy_safety as _deploy_safety
 from .django_env import DjangoBootError, ensure_django
+from .endpoint_cost import endpoint_cost as _endpoint_cost
 from .explain import explain_model as _explain_model
-from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
-from .overfetch import unused_eager_loading as _unused_eager_loading
 from .exposure_auth import open_endpoints as _open_endpoints
-from .aggregates import multiplied_aggregates as _multiplied_aggregates
-from .choices import choice_typos as _choice_typos
-from .dangling import dangling_references as _dangling_references
+from .fastapi_exposure import fastapi_exposure as _fastapi_exposure
 from .impact import impact as _impact
 from .indexes import missing_indexes as _missing_indexes
 from .introspect import list_models as _list_models
 from .loop_queries import queries_in_loops as _queries_in_loops
 from .migrations import migration_risk as _migration_risk
-from .project import get_profile as _get_profile
-from .project import resolve_root as _resolve_root
 from .money import money_precision as _money_precision
 from .nplusone import analyse_template as _analyse_template
+from .on_commit import escaping_side_effects as _escaping_side_effects
+from .overfetch import unused_eager_loading as _unused_eager_loading
+from .project import get_profile as _get_profile
+from .project import resolve_root as _resolve_root
 from .scan import scan_templates as _scan_templates
+from .serializer_nplusone import serializer_nplusone as _serializer_nplusone
 from .serializers import serializer_exposure as _serializer_exposure
 from .signals import what_happens_on as _what_happens_on
+from .sqlalchemy_nplusone import sqlalchemy_nplusone as _sqlalchemy_nplusone
+from .suggest import suggest_fixes as _suggest_fixes
 from .tenancy import find_unscoped_queries as _find_unscoped_queries
 
 mcp = MCPServer("django-chainsaw")

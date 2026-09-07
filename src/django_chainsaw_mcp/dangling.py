@@ -141,7 +141,7 @@ def _registered_url_names(root: Path) -> tuple[set[str], int, str | None]:
 
         _walk_patterns(get_resolver().url_patterns, "", 0, names)
         conf_count += 1
-    except Exception as exc:  # noqa: BLE001 - no ROOT_URLCONF, or it raises
+    except Exception as exc:
         problem = f"{type(exc).__name__}: {exc}"
 
     import importlib
@@ -154,7 +154,7 @@ def _registered_url_names(root: Path) -> tuple[set[str], int, str | None]:
                 continue
             _walk_patterns(patterns, "", 0, names)
             conf_count += 1
-        except Exception:  # noqa: BLE001 - a urls module that will not import
+        except Exception:
             continue
 
     return names, conf_count, problem
@@ -204,7 +204,7 @@ def _task_names(root: Path) -> set[str]:
         from celery import current_app
 
         names |= {name for name in current_app.tasks if not name.startswith("celery.")}
-    except Exception:  # noqa: BLE001 - no Celery, or no app configured
+    except Exception:
         pass
     return names
 
@@ -250,7 +250,7 @@ def _model_exists(label: str, cache: dict[str, bool]) -> bool:
         try:
             apps.get_model(label)
             cache[label] = True
-        except Exception:  # noqa: BLE001 - LookupError, ValueError, anything
+        except Exception:
             cache[label] = False
     return cache[label]
 
@@ -294,7 +294,7 @@ def _template_exists(name: str, cache: dict[str, bool]) -> bool:
             cache[name] = True
         except TemplateDoesNotExist:
             cache[name] = False
-        except Exception:  # noqa: BLE001
+        except Exception:
             # It was found and would not compile, which is a different
             # problem and not this one's to report.
             cache[name] = True
@@ -316,11 +316,10 @@ def _first_string(call: ast.Call, position: int | None) -> tuple[str, ...]:
             return ()
         candidate = call.args[0]
         if isinstance(candidate, (ast.List, ast.Tuple)):
-            out = tuple(
+            return tuple(
                 element.value for element in candidate.elts
                 if isinstance(element, ast.Constant) and isinstance(element.value, str)
             )
-            return out
         return ()
     if len(call.args) <= position:
         return ()

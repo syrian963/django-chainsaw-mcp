@@ -35,8 +35,9 @@ from __future__ import annotations
 import ast
 import textwrap
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import callgraph
 from .django_env import ensure_django
@@ -92,7 +93,7 @@ def _ownership_paths(root_label: str, max_depth: int) -> dict[str, dict[str, Any
                 continue
             # rel.field is the FK on the child pointing back at `model`.
             step = rel.field.name
-            path = [step] + prefix
+            path = [step, *prefix]
             paths[label] = {
                 "path": "__".join(path),
                 "depth": depth + 1,
@@ -180,7 +181,7 @@ def _filter_keys_in(node: ast.AST) -> set[str]:
     return keys
 
 
-def _class_filter_keys(graph: "callgraph.CallGraph", root: Path) -> dict[str, tuple[set[str], str]]:
+def _class_filter_keys(graph: callgraph.CallGraph, root: Path) -> dict[str, tuple[set[str], str]]:
     """For each class, the keys its get_queryset narrows by, inherited included.
 
     This closes the mixin case. `class OrderViewSet(TenantScopedViewSet)` with
@@ -403,7 +404,7 @@ def find_unscoped_queries(
             if ownership["path"] is None:
                 continue
 
-            scoped, reason = _is_scoped(keys, ownership["path"])
+            scoped, _reason = _is_scoped(keys, ownership["path"])
             if scoped:
                 continue
 

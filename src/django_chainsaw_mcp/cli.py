@@ -23,42 +23,48 @@ from pathlib import Path
 from typing import Any
 
 from . import baseline as _baseline
-from . import gitdiff as _gitdiff
-from . import sarif as _sarif
-from .amplification import amplification
-from .asyncio_blocking import blocking_in_async
-from .cascade import delete_impact
-from .celery_tasks import celery_arguments
-from .fastapi_exposure import fastapi_exposure
-from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
-from .serializer_nplusone import serializer_nplusone
-from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from . import config as _config
 from . import fixes as _fixes
-from .datetimes import datetime_audit
-from .api_contract import CONTRACT_FILE, contract, diff as contract_diff
-from .api_contract import load_snapshot, write_snapshot
+from . import gitdiff as _gitdiff
+from . import sarif as _sarif
+from .aggregates import multiplied_aggregates
+from .amplification import amplification
+from .api_contract import CONTRACT_FILE, contract, load_snapshot, write_snapshot
+from .api_contract import diff as contract_diff
+from .asyncio_blocking import blocking_in_async
 from .bypass import bypassed_effects
+from .cascade import delete_impact
+from .celery_tasks import celery_arguments
+from .check import ALL_CHECKS, GATE_DEFAULT, gate, run_all
+from .choices import choice_typos
 from .concurrency import race_conditions
+from .dangling import dangling_references
+from .datetimes import datetime_audit
 from .deploy_safety import deploy_safety
+from .django_env import (
+    PROJECT_PATH_VAR,
+    SETTINGS_MODULE_VAR,
+    BootConfig,
+    DjangoBootError,
+    ensure_django,
+)
+from .endpoint_cost import endpoint_cost
+from .explain import explain_model
 from .exposure_auth import open_endpoints
+from .fastapi_exposure import fastapi_exposure
+from .impact import impact
+from .indexes import missing_indexes
+from .introspect import list_models
+from .loop_queries import queries_in_loops
+from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
 from .overfetch import unused_eager_loading
-from .endpoint_cost import endpoint_cost
-from .explain import explain_model
-from .django_env import PROJECT_PATH_VAR, SETTINGS_MODULE_VAR, BootConfig, DjangoBootError, ensure_django
-from .indexes import missing_indexes
-from .introspect import list_models
-from .aggregates import multiplied_aggregates
-from .choices import choice_typos
-from .dangling import dangling_references
-from .impact import impact
-from .loop_queries import queries_in_loops
-from .migrations import migration_risk
 from .scan import scan_templates
+from .serializer_nplusone import serializer_nplusone
 from .serializers import serializer_exposure
 from .signals import what_happens_on
+from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .tenancy import find_unscoped_queries
 
 EXIT_OK = 0

@@ -18,30 +18,31 @@ finding.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from .aggregates import multiplied_aggregates
+from .asyncio_blocking import blocking_in_async
+from .bypass import bypassed_effects
+from .celery_tasks import celery_arguments
+from .choices import choice_typos
+from .concurrency import race_conditions
+from .dangling import dangling_references
 from .datetimes import datetime_audit
 from .deploy_safety import deploy_safety
-from .asyncio_blocking import blocking_in_async
 from .django_env import DjangoBootError, ensure_django
-from .fastapi_exposure import fastapi_exposure
-from .project import get_profile, project_root
-from .sqlalchemy_nplusone import sqlalchemy_nplusone
-from .indexes import missing_indexes
-from .aggregates import multiplied_aggregates
-from .bypass import bypassed_effects
-from .choices import choice_typos
-from .dangling import dangling_references
-from .concurrency import race_conditions
 from .exposure_auth import open_endpoints
-from .celery_tasks import celery_arguments
+from .fastapi_exposure import fastapi_exposure
+from .indexes import missing_indexes
 from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
+from .project import get_profile, project_root
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
 from .serializers import serializer_exposure
+from .sqlalchemy_nplusone import sqlalchemy_nplusone
 from .tenancy import find_unscoped_queries
 
 # Severity ordering, and the gate boundary.
@@ -335,7 +336,7 @@ def _from_aggregates(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _from_choices(report: dict[str, Any]) -> list[dict[str, Any]]:
-    out = [
+    return [
         _finding(
             "choices", f["severity"],
             f"{f['model']}.{f['field']} is never {f['value']!r}",
@@ -346,7 +347,6 @@ def _from_choices(report: dict[str, Any]) -> list[dict[str, Any]]:
     # The untyped comparisons stay out. They rest on an attribute name, and
     # the object it belongs to may not be a model at all - which is a fine
     # thing to show somebody looking, and not a thing to fail a build on.
-    return out
 
 
 def _from_dangling(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -490,7 +490,7 @@ def run_all(
     # unaffected because everything still applies.
     try:
         profile = get_profile(project_root())
-    except Exception:  # noqa: BLE001 - no path configured; fall back to old behaviour
+    except Exception:
         profile = None
 
     unknown = set(only or []) | set(skip or [])
@@ -535,7 +535,7 @@ def run_all(
             produced = adapt(report)
             findings.extend(produced)
             ran[name] = {"ok": True, "findings": len(produced)}
-        except Exception as exc:  # noqa: BLE001 - surfaced, not hidden
+        except Exception as exc:
             ran[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
     findings.sort(key=lambda f: (_ORDER.get(f["severity"], 9), f["check"], f["location"] or ""))

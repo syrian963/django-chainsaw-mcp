@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
-from .tenancy import _unwind  # noqa: PLC2701 - the queryset-chain reader lives there
+from .tenancy import _unwind
 
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",

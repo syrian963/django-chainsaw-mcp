@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 DEFAULT_BASELINE = ".django-chainsaw-baseline.json"
 
@@ -158,7 +159,7 @@ def write(path: str | Path, check: str, report: dict[str, Any]) -> dict[str, Any
     data.setdefault("version", 1)
     data.setdefault("checks", {})
     data["checks"][check] = {
-        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "recorded_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "count": len(findings),
         # Sorted so the file does not churn between runs and stays reviewable
         # in a diff.

@@ -42,7 +42,6 @@ relationships and loader options are all read from the AST.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import Any
 
 from .project import get_profile, resolve_root
@@ -271,7 +270,7 @@ class _FunctionScan(ast.NodeVisitor):
 
 
 def _route_response_model(node: ast.AST) -> str | None:
-    from .fastapi_exposure import _annotation_name, _route_decorator  # noqa: PLC2701
+    from .fastapi_exposure import _annotation_name, _route_decorator
 
     for decorator in node.decorator_list:
         route = _route_decorator(decorator)

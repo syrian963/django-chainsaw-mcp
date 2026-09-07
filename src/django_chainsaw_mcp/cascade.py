@@ -108,7 +108,7 @@ def delete_impact(model_label: str, max_depth: int = 6) -> dict[str, Any]:
                     continue
                 seen.add(key)
                 child = apps.get_model(rel["from_model"])
-                queue.append((child, depth + 1, path + [key]))
+                queue.append((child, depth + 1, [*path, key]))
             elif effect == "blocks":
                 blockers.append(record)
             elif effect in {"nulled", "reset"}:
