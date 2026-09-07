@@ -300,6 +300,17 @@ django-chainsaw aggregates [--search-path DIR] [--fail-on-findings]
 Counts and sums multiplied by a join across two multi-valued relations. Also in
 the aggregate `check` as `aggregates`. Full page: [aggregates.md](aggregates.md).
 
+### `report`
+
+```bash
+django-chainsaw report [--out FILE] [--title NAME] [--only CHECK] [--skip CHECK]
+                       [--no-impact] [--fail-on LEVEL] [--fail-on-findings]
+```
+
+Every finding as one self-contained HTML file: filter by severity, search, and
+group by endpoint, check, file or severity. The file is written whatever the
+gate decides. Full page: [report.md](report.md).
+
 ### `choices`
 
 ```bash

@@ -3,7 +3,7 @@
 ![release](https://img.shields.io/badge/release-v0.1.0-1f6feb?style=for-the-badge)
 ![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
 ![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
-![CLI commands](https://img.shields.io/badge/CLI%20commands-33-6e7681?style=for-the-badge)
+![CLI commands](https://img.shields.io/badge/CLI%20commands-34-6e7681?style=for-the-badge)
 
 ![tests](https://img.shields.io/badge/tests-272-2ea043?style=for-the-badge)
 ![coverage](https://img.shields.io/badge/coverage-82%25-2ea043?style=for-the-badge)
@@ -51,6 +51,18 @@ An earlier version of this paragraph claimed the name stays because renaming
 the repository would break every link to it. That is not true — GitHub
 permanently redirects a renamed repository — and it was the wrong reason for
 the right conclusion. The name stays because it is accurate.
+
+## Or as one HTML file
+
+```bash
+django-chainsaw report --out findings.html --title myproject
+```
+
+Every finding in a single self-contained page: filter by severity, search, and
+group by **endpoint**, check, file or severity. No server, no network, no build
+step - the CSS, the script and the data are all in the file, so it works from a
+CI artifact or an email attachment. Details:
+**[docs/report.md](docs/report.md)**.
 
 ## What it runs, and what it does not
 

@@ -115,6 +115,23 @@ Everything below this heading is the history of getting there, newest first.
 
 ### Added
 
+- **`report`: every finding as one self-contained HTML file.** A thousand
+  findings in a terminal is a scroll; the same thousand with a severity filter,
+  a search box and a grouping toggle is a working session. Group by
+  **endpoint** - which pages carry this, and through what call path - or by
+  check, file or severity, with search and the severity toggles applying to
+  whichever view is showing.
+- Deliberately not a server, not networked and not a build step. The CSS, the
+  script and the data are in the file, so it opens from a CI artifact or an
+  email attachment with nothing installed. A test asserts there is no `<link>`,
+  no `<img>`, no `src="http` and no `@import` in the output, because the tool
+  promises nothing leaves the machine and a report that fetches a font would
+  break that promise on somebody else's behalf.
+- The caveats travel with the findings: checks that could not run are listed as
+  unverified rather than omitted, checks that do not apply are grouped by
+  reason, and the endpoint view carries how many findings no entry point
+  reaches and how many of those are unresolved rather than unreached.
+
 - **In-process tests for both front ends, and a coverage floor.** The script
   suites drive the CLI and the MCP server as subprocesses, which is the right
   way to test the exit codes CI will see and the wrong way to find out whether

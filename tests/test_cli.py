@@ -150,3 +150,94 @@ def test_fix_lists_suggestions_without_writing_anything(capsys, tmp_path):
     after = {path: path.stat().st_mtime_ns for path in project_root().rglob("*.py")}
     assert before == after, "fix without --write changed a file"
     assert capsys.readouterr().out.strip()
+
+
+# --- the HTML report -------------------------------------------------------
+
+
+def test_the_report_is_one_self_contained_file(tmp_path):
+    # No server, no build step, and nothing fetched at open time: the tool
+    # promises nothing leaves the machine, and a report that pulls a font from
+    # a CDN breaks that promise on somebody else's behalf.
+    out = tmp_path / "report.html"
+    assert run("report", "--out", str(out), "--no-impact",
+               "--tenant-root", "shop.Customer") == EXIT_OK
+
+    document = out.read_text(encoding="utf-8")
+    assert document.startswith("<!doctype html>")
+    for tag in ("<link", "<img", "src=\"http", "@import"):
+        assert tag not in document, f"the report reaches outside itself: {tag}"
+
+
+def test_the_report_payload_is_parseable_and_complete(tmp_path):
+    import json
+    import re
+
+    out = tmp_path / "report.html"
+    run("report", "--out", str(out), "--no-impact", "--tenant-root", "shop.Customer")
+    document = out.read_text(encoding="utf-8")
+
+    payload = re.search(
+        r'<script type="application/json" id="payload">(.*?)</script>',
+        document,
+        re.S,
+    )
+    assert payload, "the report carries no payload"
+    data = json.loads(payload.group(1))
+    assert data["findings"], "no findings in the payload"
+    assert data["checks_ran"]
+    assert {"check", "severity", "title", "location"} <= set(data["findings"][0])
+
+
+def test_a_finding_containing_a_script_tag_cannot_close_the_payload(tmp_path):
+    # A finding quotes real source. If that source contained `</script>` the
+    # payload would end early and the page would render as text.
+    from django_chainsaw_mcp.report import html_report
+
+    document = html_report(
+        {
+            "findings": [{
+                "check": "made-up",
+                "severity": "high",
+                "title": "</script><script>alert(1)</script>",
+                "location": "a.py:1",
+                "detail": "<img onerror=alert(2)>",
+                "fix": "&amp; <b>",
+            }],
+            "by_severity": {"high": 1},
+            "checks_run": {"made-up": {"ok": True}},
+        },
+    )
+    assert "</script><script>alert(1)" not in document
+    assert document.count("</script>") == 2, "one payload tag and one script tag"
+
+
+def test_the_report_keeps_the_caveats_that_travel_with_the_findings(tmp_path):
+    from django_chainsaw_mcp.report import html_report
+
+    document = html_report(
+        {
+            "findings": [],
+            "by_severity": {},
+            "checks_run": {"broken": {"ok": False, "error": "RuntimeError: nope"}},
+            "checks_failed": ["broken"],
+            "checks_not_applicable": {"routes": "no FastAPI here"},
+        },
+    )
+    # A check that could not run is unverified, not clean.
+    assert "could not run" in document
+    assert "RuntimeError: nope" in document
+    assert "no FastAPI here" in document
+
+
+def test_the_report_gate_is_separate_from_writing_the_file(tmp_path):
+    out = tmp_path / "report.html"
+    # Writing always happens; the exit code is the caller's choice.
+    assert run("report", "--out", str(out), "--no-impact",
+               "--tenant-root", "shop.Customer") == EXIT_OK
+    assert out.exists()
+
+    out.unlink()
+    assert run("report", "--out", str(out), "--no-impact", "--fail-on-findings",
+               "--tenant-root", "shop.Customer") == EXIT_FINDINGS
+    assert out.exists(), "the file must be written even when the gate trips"

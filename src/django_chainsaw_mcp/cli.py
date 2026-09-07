@@ -61,6 +61,7 @@ from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
 from .overfetch import unused_eager_loading
+from .report import write_report
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
 from .serializers import serializer_exposure
@@ -808,6 +809,35 @@ def _cmd_aggregates(args: argparse.Namespace) -> int:
         print(report["note"])
 
     if args.fail_on_findings and (report["finding_count"] or report["filter_count"]):
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    report = run_all(
+        tenant_root=args.tenant_root,
+        only=args.only,
+        skip=args.skip,
+    )
+    impact_report = None
+    if not args.no_impact:
+        from .impact import impact
+
+        impact_report = impact(report=report, tenant_root=args.tenant_root)
+
+    target = Path(args.out).expanduser()
+    size = write_report(target, report, impact_report, project=args.title or "")
+
+    counts = ", ".join(f"{n} {name}" for name, n in report["by_severity"].items())
+    print(f"{report['finding_count']} finding(s) ({counts or 'none'}) written to "
+          f"{target} ({size // 1024} KB)")
+    print("One file, no server and no network: open it in a browser, or attach "
+          "it to a merge request.")
+    if impact_report:
+        print(f"Grouped by {impact_report['entry_points_with_findings']} affected "
+              f"endpoint(s) as well as by check, file and severity.")
+
+    if args.fail_on_findings and gate(report, args.fail_on):
         return EXIT_FINDINGS
     return EXIT_OK
 
@@ -1933,6 +1963,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any multiplied aggregate")
     p.set_defaults(func=_cmd_aggregates)
+
+    p = sub.add_parser("report",
+                       help="every finding as one self-contained HTML file")
+    p.add_argument("--out", default="django-chainsaw-report.html", metavar="FILE")
+    p.add_argument("--title", metavar="NAME",
+                   help="what to call the project in the heading")
+    p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")
+    p.add_argument("--only", action="append", choices=list(ALL_CHECKS), metavar="CHECK",
+                   help="include just this check, repeatable")
+    p.add_argument("--skip", action="append", choices=list(ALL_CHECKS), metavar="CHECK",
+                   help="exclude this check, repeatable")
+    p.add_argument("--no-impact", action="store_true",
+                   help="skip the endpoint grouping, which costs a second pass")
+    p.add_argument("--fail-on", default=GATE_DEFAULT,
+                   choices=["critical", "high", "medium", "low"],
+                   help=f"severity the gate trips at (default: {GATE_DEFAULT})")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 as well as writing the file, so CI can gate")
+    p.set_defaults(func=_cmd_report)
 
     p = sub.add_parser("choices",
                        help="literals a field's choices will never match")

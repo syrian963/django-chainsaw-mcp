@@ -15,6 +15,7 @@ Start at the row that matches what you are trying to do.
 | | |
 | --- | --- |
 | [Command line](cli.md) | every subcommand, exit codes, a CI workflow |
+| [HTML report](report.md) | every finding as one file you can open, filter and hand over |
 | [Tool reference](tools.md) | every MCP tool, its arguments and its output |
 | [Suggestions and fixes](fixes.md) | findings as real code, and which are safe to apply |
 | [Baselines](baseline.md) | adopting this on a codebase that already has findings |
