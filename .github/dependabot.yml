@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # The runtime dependency is `mcp`, and the protocol moves. A version bump
+  # that breaks the transport is the kind of thing that should arrive as a red
+  # pipeline rather than as a bug report from somebody's client.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        patterns: ["pytest*", "ruff", "coverage*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

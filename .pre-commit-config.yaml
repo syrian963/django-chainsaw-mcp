@@ -1,0 +1,42 @@
+# The cheap half of CI, before the commit rather than after the push.
+#
+# Deliberately only the fast hooks. The test suites take minutes and belong in
+# CI; a pre-commit hook that people learn to skip with --no-verify is worse
+# than no hook, because it teaches the habit.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^(src|tests)/
+      - id: ruff-format
+        stages: [manual]   # formatting is not enforced here; ruff check is
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^testprojects/
+      - id: end-of-file-fixer
+        exclude: ^testprojects/
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=200]
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  - repo: local
+    hooks:
+      # The one project-specific hook worth the wait. The README states the
+      # number of checks, the tool count and the versions on its badges, and
+      # this repository has already shipped a README claiming thirteen checks
+      # when it had eighteen.
+      - id: docs-match-code
+        name: documentation covers the code
+        entry: bash docs_check.sh
+        language: system
+        pass_filenames: false
+        files: ^(src/|README\.md|docs/|pyproject\.toml)

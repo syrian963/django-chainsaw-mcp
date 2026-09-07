@@ -1,0 +1,56 @@
+name: A check that does not exist yet
+description: A defect class this could find and currently cannot
+labels: ["new check"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every check here had to clear the same bar, and two proposals were
+        dropped at it after being built. All four questions below are that bar.
+
+  - type: textarea
+    id: defect
+    attributes:
+      label: The defect, as code
+      description: >
+        The wrong version and the right version side by side, as short as they
+        can be while still being wrong.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: silence
+    attributes:
+      label: How it fails
+      description: >
+        What happens in production, and why nobody notices. The checks that
+        earn their place here find things that raise nothing: a query that
+        returns zero rows forever, a receiver that never connects, a scheduled
+        job that quietly stops. A defect that already throws an exception is
+        usually somebody else's job.
+    validations:
+      required: true
+
+  - type: textarea
+    id: prior_art
+    attributes:
+      label: What already finds it
+      description: >
+        Please look first. mypy with django-stubs, ruff's DJ rules,
+        flake8-django, Django's own system checks, or a runtime tool like
+        nplusone. If one of them covers it, this should not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: silent_on
+    attributes:
+      label: What it must stay silent on
+      description: >
+        The correct spelling that looks similar. This is the half that decides
+        whether a check is usable: a confident wrong answer is worse than an
+        incomplete one, and two features were deleted from this repository
+        because they could not tell the two apart.
+    validations:
+      required: true

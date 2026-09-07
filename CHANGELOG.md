@@ -115,6 +115,32 @@ Everything below this heading is the history of getting there, newest first.
 
 ### Added
 
+- **`SECURITY.md`**, and it leads with the thing that matters: this tool
+  imports the project you point it at, so analysing an unfamiliar repository
+  is the same act as running it. It also states what the tool does not do -
+  never runs a view or a task, touches the database only to ask which
+  migrations are applied, writes only when asked, makes no network calls -
+  with each claim checked against the source rather than assumed, and names
+  injection into the HTML report as a real vulnerability class rather than a
+  cosmetic one.
+- **Issue templates that ask the questions that actually resolve a report.**
+  The bug form asks for the Django version, the Python version and whether
+  `project-info` succeeds, because most "it found nothing" reports are a
+  settings module that could not be imported. The new-check form asks the four
+  questions every check here had to answer, including the one that decides it:
+  what it must stay silent on.
+- A pull request template that asks for the evidence rather than a promise: the
+  test that fails without the fix, or the benchmark number with its spread.
+- **A release workflow.** Publishing is driven by a tag, and the job refuses
+  unless the tag matches the version in `pyproject.toml` and the changelog has
+  a section for it. Trusted publishing, so there is no API token to leak.
+- `CODE_OF_CONDUCT.md`, `.pre-commit-config.yaml` and `dependabot.yml`.
+- **A screenshot of the HTML report** in the README, taken from the demo
+  project in this repository.
+- `docs_check.sh` also verifies that every local link in the README resolves.
+  A broken image is the first thing a visitor sees and the easiest thing to
+  break by moving a file. Demonstrated failing before it was kept.
+
 - **`report`: every finding as one self-contained HTML file.** A thousand
   findings in a terminal is a scroll; the same thousand with a severity filter,
   a search box and a grouping toggle is a working session. Group by

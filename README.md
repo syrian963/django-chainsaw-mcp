@@ -59,10 +59,14 @@ django-chainsaw report --out findings.html --title myproject
 ```
 
 Every finding in a single self-contained page: filter by severity, search, and
-group by **endpoint**, check, file or severity. No server, no network, no build
-step - the CSS, the script and the data are all in the file, so it works from a
-CI artifact or an email attachment. Details:
-**[docs/report.md](docs/report.md)**.
+group by **endpoint**, check, file or severity.
+
+![The HTML report, grouped by endpoint](docs/assets/report.png)
+
+Grouped by endpoint is the view that matters: *which pages carry this, and
+through what call path*. No server, no network, no build step - the CSS, the
+script and the data are all in the file, so it works from a CI artifact or an
+email attachment. Details: **[docs/report.md](docs/report.md)**.
 
 ## What it runs, and what it does not
 
@@ -179,6 +183,28 @@ Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
 
 Full reference: [`docs/tools.md`](docs/tools.md).
+
+## Contributing, and the bar a new check has to clear
+
+`CONTRIBUTING.md` has the workflow. The part worth knowing before you start:
+
+Every check in here documents **what it cannot see**, in its own output and on
+its own page, and every suppression carries the reason next to it. That is not
+politeness - it is the difference between a tool somebody trusts and one they
+learn to ignore. Two finished features were deleted from this repository after
+measurement showed they could not tell a real finding from a correct one.
+
+So a proposal for a new check answers four questions, which the
+[issue template](.github/ISSUE_TEMPLATE/new_check.yml) asks directly: what the
+defect looks like as code, how it fails in production, what already finds it,
+and what it must stay silent on.
+
+| | |
+| --- | --- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | workflow, house style, how to run the suites |
+| [`SECURITY.md`](SECURITY.md) | what this does to the code you point it at, and how to report a vulnerability |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | be straight with people and be kind about it |
+| [`CHANGELOG.md`](CHANGELOG.md) | every release, and the reasoning behind the changes |
 
 ## Beyond Django
 

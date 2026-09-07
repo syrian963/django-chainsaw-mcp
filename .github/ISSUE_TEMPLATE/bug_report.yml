@@ -1,0 +1,84 @@
+name: Bug report
+description: Something reported the wrong thing, crashed, or stayed silent when it should not have
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Three questions answer most reports here, and they are the first three
+        fields below: which Django, which Python, and whether the tool could
+        load your project at all.
+
+        A findings report names your models and endpoints. A redacted excerpt
+        is plenty — please do not paste a whole report into a public issue.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of wrong
+      options:
+        - It reported something that is not a problem (false positive)
+        - It missed something it should have found (false negative)
+        - It crashed
+        - It reported nothing and I expected it to look
+        - The output or the docs are wrong or unclear
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: The tool, Python and Django.
+      placeholder: "chainsaw 0.1.0, Python 3.12.4, Django 5.2.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: booted
+    attributes:
+      label: Did the tool load your project
+      description: >
+        `django-chainsaw project-info` says. Most "it found nothing" reports
+        are a settings module it could not import, and the answer is in that
+        one command.
+      options:
+        - "Yes, project-info succeeds"
+        - "No, project-info reports an error"
+        - "I have not run project-info"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The command, and what it printed
+      description: >
+        Include the whole invocation with its environment variables. If a check
+        skipped itself, its reason is part of the output and is usually the
+        answer.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: The smallest code that shows it
+      description: >
+        For a false positive or a false negative, the model or the function it
+        is about, reduced as far as it still reproduces. Rename anything you
+        need to; the shape is what matters.
+      render: python
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead, and why
+      description: >
+        For a false positive: why the code is correct. That reasoning is the
+        actual content of the report - every check here documents what it
+        cannot see, and a finding that contradicts the code is worth more than
+        one that contradicts a preference.
+    validations:
+      required: true

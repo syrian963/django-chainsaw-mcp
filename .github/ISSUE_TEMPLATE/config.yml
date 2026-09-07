@@ -1,0 +1,15 @@
+blank_issues_enabled: true
+contact_links:
+  - name: It found nothing on my project
+    url: https://github.com/syrian963/django-chainsaw-mcp/blob/main/docs/usage.md
+    about: >
+      Almost always the environment: the tool has to run in the same
+      interpreter as the project it analyses. usage.md covers that constraint,
+      Docker, and how to tell the difference between "clean" and "could not
+      look".
+  - name: What a check cannot see
+    url: https://github.com/syrian963/django-chainsaw-mcp/blob/main/docs/limitations.md
+    about: >
+      Every check documents its own blind spots, and limitations.md separates
+      what is undecidable from what is merely unimplemented. Worth a look
+      before filing a false negative.

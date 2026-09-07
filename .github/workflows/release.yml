@@ -1,0 +1,72 @@
+name: release
+
+# Publishing is driven by a tag, and the tag has to agree with the version in
+# pyproject.toml. A release that says 0.1.0 on PyPI and 0.1.1 in the metadata
+# is a support question nobody can answer, so the job refuses rather than
+# guesses.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: The tag and the version have to match
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(uv run python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag $tag, pyproject $declared"
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag v$tag does not match version $declared in pyproject.toml"
+            exit 1
+          fi
+
+      - name: The changelog has to mention it
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if ! grep -q "\[$tag\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $tag"
+            exit 1
+          fi
+
+      - name: Everything green before anything is published
+        run: bash run_tests.sh
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv run --with twine twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted publishing: no API token in a secret to leak or rotate.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
