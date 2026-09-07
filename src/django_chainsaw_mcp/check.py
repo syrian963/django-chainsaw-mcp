@@ -52,11 +52,28 @@ GATE_DEFAULT = "high"
 
 def _finding(check: str, severity: str, title: str, location: str | None,
              detail: str, fix: str | None = None) -> dict[str, Any]:
+    """One finding in the merged shape.
+
+    `location` is whatever the check found natural - a file and line, an app
+    and migration, a serializer class. When it is a file and line, the two are
+    also given separately: `--since` compares paths against a git diff and
+    cannot do that with "app/x.py:12", and every consumer that wanted the file
+    was parsing the string itself.
+    """
+    file_name: str | None = None
+    line: int | None = None
+    if location and ":" in location:
+        head, _, tail = location.rpartition(":")
+        if tail.isdigit() and head.endswith(".py"):
+            file_name, line = head, int(tail)
+
     return {
         "check": check,
         "severity": severity,
         "title": title,
         "location": location,
+        "file": file_name,
+        "line": line,
         "detail": detail,
         "fix": fix,
     }

@@ -28,8 +28,15 @@ by surprise.
 
 ```bash
 django-chainsaw check [--tenant-root app.Model] [--only CHECK] [--skip CHECK]
-                      [--fail-on critical|high|medium|low] [--strict] [--sarif FILE]
+                      [--fail-on critical|high|medium|low] [--strict] [--sarif FILE] [--since REF]
 ```
+
+`--since REF` narrows the findings to files this branch changed against
+`REF`, using the merge base so a branch that is behind main is not blamed
+for what main gained. A finding with no file - a migration, a serializer
+class - cannot be placed in a diff and is **kept**: a gate that quietly
+discards what it cannot match reports a clean branch over a real problem.
+The count of those is printed with the rest.
 
 Runs every analysis whose findings are defects, merges them into one list sorted
 worst first, and returns one exit code. `--fail-on` defaults to `high`.

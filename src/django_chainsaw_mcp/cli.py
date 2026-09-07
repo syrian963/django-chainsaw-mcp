@@ -819,6 +819,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
         only=args.only,
         skip=args.skip,
     )
+
     impact_report = None
     if not args.no_impact:
         from .impact import impact
@@ -1228,6 +1229,27 @@ def _cmd_check(args: argparse.Namespace) -> int:
         root = Path(ensure_django().project_path)
     except DjangoBootError:
         root = project_root()
+
+    # `--since` narrows to the branch. A finding with no file - a migration,
+    # a serializer class - cannot be placed in a diff and is kept rather than
+    # dropped: a gate that quietly discards what it cannot match reports a
+    # clean branch over a real problem.
+    if getattr(args, "since", None):
+        placeable = [f for f in report["findings"] if f.get("file")]
+        unplaceable = [f for f in report["findings"] if not f.get("file")]
+        kept, narrowed = _restrict_to_changes(args, placeable, root)
+        if narrowed:
+            counts: dict[str, int] = {}
+            for finding in kept + unplaceable:
+                counts[finding["severity"]] = counts.get(finding["severity"], 0) + 1
+            report = dict(
+                report,
+                findings=kept + unplaceable,
+                finding_count=len(kept) + len(unplaceable),
+                by_severity=counts,
+                narrowed_to=args.since,
+                kept_without_a_file=len(unplaceable),
+            )
 
     if project.ignore:
         kept = [
@@ -2041,6 +2063,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 2 if any check failed to run, instead of reporting the rest")
     p.add_argument("--sarif", metavar="FILE",
                    help="also write SARIF, so a code-scanning UI can annotate the diff")
+    p.add_argument("--since", metavar="REF",
+                   help="only findings in files this branch changed against REF")
     p.set_defaults(func=_cmd_check)
 
     p = sub.add_parser("n+1-serializer", help="N+1 in DRF serializers")

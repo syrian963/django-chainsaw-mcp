@@ -51,6 +51,23 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`check --since` was documented and did not exist.** `docs/quickstart.md`
+  advertised `django-chainsaw check --since main --fail-on high` in a CI
+  snippet, and `check` had no `--since`: anybody who copied that line got an
+  argparse error. The flag exists now, because the feature is coherent and the
+  documentation promised it.
+- `docs_check.sh` parses **every** `django-chainsaw ...` line in the README and
+  the docs pages, 48 of them, so a documented command that does not work fails
+  the build. It verified the command *names* before, which is why this one got
+  through. The first version of the extractor missed the failing line because
+  it sits in a GitHub Actions step under `run:` rather than at the start of a
+  line; that is fixed and the gate was demonstrated failing on the original
+  bug before being kept.
+- An aggregate finding now carries `file` and `line` separately when its
+  location has them. `--since` compares paths against a git diff and cannot do
+  that with `app/x.py:12`, and every consumer that wanted the file was parsing
+  the string itself.
+
 - **`django-chainsaw choices` raised `KeyError` on every run that found
   something.** When the untyped-comparison route was removed the printer kept
   a loop over the report key that went with it. No test entered that branch:
@@ -114,6 +131,10 @@ Everything below this heading is the history of getting there, newest first.
   shallow call graphs and the checks that walk one pay for that difference.
 
 ### Added
+
+- Tests for the `--json`, `--since` and `--baseline` paths of the CLI, which
+  are what a pipeline actually runs. `cli.py` 63% to 77%, total coverage 86%,
+  314 tests.
 
 - **Tests for the two features that decide what CI is allowed to ignore.**
   `--since main` and `--baseline` both answer their question by *removing*

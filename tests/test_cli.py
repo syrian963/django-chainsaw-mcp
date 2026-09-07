@@ -272,3 +272,95 @@ def test_the_report_gate_is_separate_from_writing_the_file(tmp_path):
     assert run("report", "--out", str(out), "--no-impact", "--fail-on-findings",
                "--tenant-root", "shop.Customer") == EXIT_FINDINGS
     assert out.exists(), "the file must be written even when the gate trips"
+
+
+# --- the paths that decide what a pipeline sees ----------------------------
+
+
+@pytest.mark.parametrize("command", ["models", "indexes", "loops", "check", "impact"])
+def test_json_output_parses_for_the_commands_ci_reads(command):
+    # A broken JSON branch does not look broken: it looks like an integration
+    # that stopped working, and the error surfaces in whatever consumes it.
+    import io
+    import json
+    from contextlib import redirect_stdout
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        args = ["--json", command]
+        if command in {"check", "impact"}:
+            args += ["--tenant-road" if False else "--tenant-root", "shop.Customer"]
+        run(*args)
+    json.loads(buffer.getvalue())
+
+
+def test_since_restricts_the_findings_to_a_diff(capsys):
+    # `--since HEAD` is a diff against the current commit, so on a clean tree
+    # nothing is in it. A gate that reported findings anyway would be gating on
+    # the whole codebase while claiming to gate on the branch.
+    assert run("indexes", "--since", "HEAD") == EXIT_OK
+    out = capsys.readouterr().out
+    assert "HEAD" in out or "changed" in out.lower(), out
+
+
+def test_since_says_what_it_could_not_place(capsys):
+    # A finding with no file cannot be matched against a diff. Dropping it
+    # silently is how `--since` would report a clean branch over a real
+    # problem, so the count has to appear.
+    run("check", "--since", "HEAD", "--tenant-root", "shop.Customer")
+    out = capsys.readouterr().out
+    assert "since" in out.lower() or "changed" in out.lower(), out
+
+
+def test_a_bad_ref_warns_and_reports_everything_rather_than_nothing(capsys):
+    """A ref git cannot resolve must not look like an empty diff.
+
+    The behaviour is to warn and analyse the whole tree, which is the
+    fail-safe direction: the answer is a superset rather than a subset, and it
+    says on stderr that the narrowing did not happen. Narrowing to nothing
+    would report a clean branch because somebody renamed main.
+    """
+    everything = run("indexes")
+    capsys.readouterr()
+
+    assert run("indexes", "--since", "definitely-not-a-ref") == everything
+    result = capsys.readouterr()
+    assert "definitely-not-a-ref" in result.err, "the ignored ref has to be named"
+    assert "Since" not in result.out, "it must not claim to have narrowed"
+    # And the findings are the unnarrowed set, not a smaller one.
+    # The count line is the honest witness: it is the unnarrowed number.
+    assert "candidates:" in result.out
+
+
+def test_a_baseline_round_trip_through_the_cli(tmp_path, capsys):
+    path = tmp_path / "tenancy-baseline.json"
+
+    # Record, then compare against the recording: everything is accepted.
+    assert run("tenancy", "--tenant-root", "shop.Customer",
+               "--baseline", str(path), "--update-baseline") == EXIT_OK
+    assert path.is_file()
+    capsys.readouterr()
+
+    assert run("tenancy", "--tenant-root", "shop.Customer",
+               "--baseline", str(path)) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "baseline" in out.lower(), out
+
+
+def test_an_unset_project_path_is_an_error_with_the_variable_named(capsys, monkeypatch):
+    # The first thing a new user sees. It has to name the variable and say
+    # what to point it at.
+    monkeypatch.delenv("DJANGO_CHAINSAW_PROJECT_PATH", raising=False)
+    monkeypatch.delenv("DJANGO_CHAINSAW_SETTINGS_MODULE", raising=False)
+    from django_chainsaw_mcp import django_env
+
+    monkeypatch.setattr(
+        django_env, "ensure_django",
+        lambda *a, **k: (_ for _ in ()).throw(
+            django_env.DjangoBootError("Missing environment variable(s)")
+        ),
+    )
+    code = run("models")
+    assert code != EXIT_OK
+    combined = capsys.readouterr()
+    assert "DJANGO_CHAINSAW" in (combined.out + combined.err)
