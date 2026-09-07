@@ -150,6 +150,56 @@ async def main() -> int:
         if ("shop.Product", "sku") in flagged:
             failures.append("sku is unique and indexed, it must not be reported")
 
+        # Declaring things in the module and them arriving over the wire are
+        # two different questions. The in-process tests answer the first.
+        annotated = [t for t in tools.tools if getattr(t, "annotations", None)]
+        writing = [
+            t.name for t in annotated
+            if not getattr(t.annotations, "readOnlyHint",
+                           getattr(t.annotations, "read_only_hint", None))
+        ]
+        print(f"ANNOTATIONS: {len(annotated)} of {len(tools.tools)} tool(s), "
+              f"writing={writing}")
+        if len(annotated) != len(tools.tools):
+            failures.append("some tools arrive without annotations, so a client "
+                            "cannot tell a read from a write")
+        if writing != ["api_contract_check"]:
+            failures.append(f"unexpected non-read-only tools over the wire: {writing}")
+
+        prompts = await client.list_prompts()
+        prompt_names = sorted(p.name for p in prompts.prompts)
+        print("PROMPTS:", ", ".join(prompt_names) or "(none)")
+        for expected in ("before_deploy", "triage"):
+            if expected not in prompt_names:
+                failures.append(f"prompt missing over the wire: {expected}")
+
+        if "what_breaks_if_i_delete" in prompt_names:
+            filled = await client.get_prompt(
+                "what_breaks_if_i_delete", {"model": "shop.Customer"}
+            )
+            body = "".join(
+                getattr(m.content, "text", "") or "" for m in filled.messages
+            )
+            print(f"GET_PROMPT what_breaks_if_i_delete: {len(body)} chars")
+            if "shop.Customer" not in body:
+                failures.append("a prompt argument did not reach the rendered text")
+
+        # Completion is a separate request type, and a handler that works in
+        # process can still be unregistered on the server.
+        try:
+            from mcp.types import PromptReference
+
+            completed = await client.complete(
+                ref=PromptReference(type="ref/prompt", name="what_breaks_if_i_delete"),
+                argument={"name": "model", "value": "ord"},
+            )
+            values = completed.completion.values
+            print("COMPLETE model='ord':", values)
+            if "shop.Order" not in values:
+                failures.append(f"model completion did not suggest shop.Order: {values}")
+        except Exception as exc:  # noqa: BLE001 - reported, not raised
+            failures.append(f"completion over the wire failed: {type(exc).__name__}: {exc}")
+
         resources = await client.list_resources()
         uris = [str(r.uri) for r in resources.resources]
         print("RESOURCES:", ", ".join(uris) or "(none)")

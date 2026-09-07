@@ -18,6 +18,7 @@ import json
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
 
 from .aggregates import multiplied_aggregates as _multiplied_aggregates
 from .amplification import amplification as _amplification
@@ -60,7 +61,78 @@ from .sqlalchemy_nplusone import sqlalchemy_nplusone as _sqlalchemy_nplusone
 from .suggest import suggest_fixes as _suggest_fixes
 from .tenancy import find_unscoped_queries as _find_unscoped_queries
 
-mcp = MCPServer("django-chainsaw")
+# What a client is told about this server before it calls anything.
+#
+# An assistant handed 36 tools with no ordering picks by name, and the names
+# do not say which question each answers. These instructions are the ordering:
+# where to start when something is broken, which tool answers which question,
+# and - the part that matters most - that an empty result from this server
+# means "could not look" as often as it means "nothing to find", and that the
+# reports say which.
+INSTRUCTIONS = """Read-only analysis of a Django project. Nothing here runs the application,
+changes data, or reaches the network.
+
+**Start with `project_info`** whenever anything looks wrong or empty. Almost
+every "it found nothing" is a settings module the server could not import, and
+that one call says so.
+
+Which tool answers which question:
+
+- *What will break when I deploy?* `deploy_safety`, then `migration_risk`.
+- *What does this delete take with it?* `delete_impact`.
+- *Why is this endpoint slow?* `endpoint_cost`, `serializer_nplusone`,
+  `queries_in_loops`, `unused_eager_loading`.
+- *Where do I start on a long list?* `request_impact` groups every finding by
+  the endpoints that reach it.
+- *What can a stranger reach?* `open_endpoints`, then `amplification`.
+- *Which query returns nothing forever?* `choice_typos`.
+- *Which link, template, receiver or scheduled task is already dead?*
+  `dangling_references`.
+- *Everything at once, with one verdict:* `check`.
+
+Two things to carry into how you read the answers.
+
+**An empty result is not the same as a clean one.** Every report says how much
+it could see: how many views it found, how many literals it checked, which
+checks could not run. Quote that alongside a "nothing found", because a check
+that could not import the project reports zero findings too.
+
+**Every check states what it cannot see, in its own output.** Those sentences
+are not disclaimers to skip - they are the boundary of the answer, and passing
+them on is the difference between a useful report and a misleading one.
+"""
+
+mcp = MCPServer(
+    "django-chainsaw",
+    title="Django Chainsaw",
+    version="0.1.0",
+    instructions=INSTRUCTIONS,
+    website_url="https://github.com/syrian963/django-chainsaw-mcp",
+)
+
+# Everything here reads. Declaring it lets a client stop asking permission for
+# each of 36 calls, which is the difference between a server somebody uses
+# while working and one they use once.
+#
+# `idempotent_hint` is true because the same question about an unchanged tree
+# gives the same answer - these are analyses, not requests. `open_world_hint`
+# is false because the only thing they touch is the project on disk.
+READS_ONLY = ToolAnnotations(
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
+)
+
+# The one exception: `update=True` writes the contract snapshot. Writing the
+# same capture twice is still idempotent, and it destroys nothing, but a client
+# that auto-approves read-only calls should stop and ask about this one.
+WRITES_A_SNAPSHOT = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
+)
 
 
 def _guard(fn, *args, **kwargs) -> dict[str, Any]:
@@ -71,7 +143,7 @@ def _guard(fn, *args, **kwargs) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def project_info() -> dict[str, Any]:
     """Check that the target Django project loads, and report what it is.
 
@@ -100,7 +172,7 @@ def project_info() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def endpoint_cost(
     page_size: int = 50,
     nested_fan_out: int = 5,
@@ -132,7 +204,7 @@ def endpoint_cost(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def api_contract(max_depth: int = 3) -> dict[str, Any]:
     """The shape every serializer currently promises its clients.
 
@@ -149,7 +221,7 @@ def api_contract(max_depth: int = 3) -> dict[str, Any]:
     return _guard(_contract, max_depth=max_depth)
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITES_A_SNAPSHOT)
 def api_contract_check(
     snapshot_path: str = _CONTRACT_FILE,
     update: bool = False,
@@ -195,7 +267,7 @@ def api_contract_check(
     return _guard(run)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def escaping_side_effects(
     search_path: str | None = None,
     include_low_confidence: bool = False,
@@ -232,7 +304,7 @@ def escaping_side_effects(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def bypassed_effects(search_path: str | None = None, model: str | None = None) -> dict[str, Any]:
     """Bulk writes that skip everything the model's save() chain promised.
 
@@ -257,7 +329,7 @@ def bypassed_effects(search_path: str | None = None, model: str | None = None) -
     return _guard(_bypassed_effects, search_path=search_path, model=model)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def race_conditions(search_path: str | None = None, include_parameters: bool = True) -> dict[str, Any]:
     """Read-modify-save races, and row locks taken outside any transaction.
 
@@ -288,7 +360,7 @@ def race_conditions(search_path: str | None = None, include_parameters: bool = T
     return _guard(_race_conditions, search_path=search_path, include_parameters=include_parameters)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def open_endpoints(include_unbounded: bool = True) -> dict[str, Any]:
     """Endpoints anyone can call, crossed with what their serializer exposes.
 
@@ -311,7 +383,7 @@ def open_endpoints(include_unbounded: bool = True) -> dict[str, Any]:
     return _guard(_open_endpoints, include_unbounded=include_unbounded)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]:
     """select_related and prefetch_related the serializer never reads.
 
@@ -337,7 +409,7 @@ def unused_eager_loading(include_low_confidence: bool = False) -> dict[str, Any]
     return _guard(_unused_eager_loading, include_low_confidence=include_low_confidence)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def money_precision(search_path: str | None = None) -> dict[str, Any]:
     """Places where a decimal amount stops being exact.
 
@@ -364,7 +436,7 @@ def money_precision(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_money_precision, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def project_profile(search_path: str | None = None) -> dict[str, Any]:
     """What this project is built on, without needing Django to boot.
 
@@ -385,7 +457,7 @@ def project_profile(search_path: str | None = None) -> dict[str, Any]:
     return _guard(run)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def blocking_in_async(
     search_path: str | None = None,
     follow_calls: bool = True,
@@ -420,7 +492,7 @@ def blocking_in_async(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
     """FastAPI endpoints that serialise more than they declare.
 
@@ -450,7 +522,7 @@ def fastapi_exposure(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_fastapi_exposure, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def sqlalchemy_nplusone(search_path: str | None = None) -> dict[str, Any]:
     """Relationships SQLAlchemy will load one row at a time.
 
@@ -482,7 +554,7 @@ def sqlalchemy_nplusone(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_sqlalchemy_nplusone, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def amplification(search_path: str | None = None) -> dict[str, Any]:
     """Endpoints anyone can call that cost a great deal to answer.
 
@@ -510,7 +582,7 @@ def amplification(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_amplification, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def celery_arguments(search_path: str | None = None) -> dict[str, Any]:
     """Model instances handed to Celery tasks, and calls whose arity is wrong.
 
@@ -540,7 +612,7 @@ def celery_arguments(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_celery_arguments, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def queries_in_loops(
     search_path: str | None = None,
     include_writes: bool = True,
@@ -578,7 +650,7 @@ def queries_in_loops(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def request_impact(
     search_path: str | None = None,
     max_depth: int = 8,
@@ -614,7 +686,7 @@ def request_impact(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def choice_typos(
     search_path: str | None = None,
     include_tests: bool = True,
@@ -649,7 +721,7 @@ def choice_typos(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def dangling_references(
     search_path: str | None = None,
     include_templates: bool = True,
@@ -686,7 +758,7 @@ def dangling_references(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def multiplied_aggregates(search_path: str | None = None) -> dict[str, Any]:
     """Aggregates whose numbers are wrong because a join multiplied the rows.
 
@@ -714,7 +786,7 @@ def multiplied_aggregates(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_multiplied_aggregates, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def suggest_fixes(tenant_root: str = "auth.User") -> dict[str, Any]:
     """Findings turned into code, grouped by how safe each one is to apply.
 
@@ -737,7 +809,7 @@ def suggest_fixes(tenant_root: str = "auth.User") -> dict[str, Any]:
     return _guard(_suggest_fixes, tenant_root=tenant_root)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def check(
     tenant_root: str = "auth.User",
     only: list[str] | None = None,
@@ -760,7 +832,7 @@ def check(
     return _guard(_run_all, tenant_root=tenant_root, only=only, skip=skip)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
     """N+1 queries in DRF serializers, with the queryset fix for each.
 
@@ -776,7 +848,7 @@ def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
     return _guard(_serializer_nplusone, max_depth=max_depth)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def explain_model(
     model_label: str,
     tenant_root: str = "auth.User",
@@ -807,7 +879,7 @@ def explain_model(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def list_models(app_label: str | None = None, include_fields: bool = True) -> dict[str, Any]:
     """List the project's models with their fields and relations.
 
@@ -818,7 +890,7 @@ def list_models(app_label: str | None = None, include_fields: bool = True) -> di
     return _guard(_list_models, app_label=app_label, include_fields=include_fields)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def delete_impact(model_label: str, max_depth: int = 6) -> dict[str, Any]:
     """Show what deleting one row of a model would take with it.
 
@@ -833,7 +905,7 @@ def delete_impact(model_label: str, max_depth: int = 6) -> dict[str, Any]:
     return _guard(_delete_impact, model_label=model_label, max_depth=max_depth)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def find_n_plus_one(template_path: str, root_models: dict[str, str]) -> dict[str, Any]:
     """Find relation traversals in a template that each cost a query.
 
@@ -850,7 +922,7 @@ def find_n_plus_one(template_path: str, root_models: dict[str, str]) -> dict[str
     return _guard(_analyse_template, template_path=template_path, root_models=root_models)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def scan_templates(
     template_root: str | None = None,
     project_root: str | None = None,
@@ -875,7 +947,7 @@ def scan_templates(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def serializer_exposure(include_safe: bool = False) -> dict[str, Any]:
     """What each DRF ModelSerializer exposes, and what looks unintended.
 
@@ -889,7 +961,7 @@ def serializer_exposure(include_safe: bool = False) -> dict[str, Any]:
     return _guard(_serializer_exposure, include_safe=include_safe)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def datetime_audit(search_path: str | None = None) -> dict[str, Any]:
     """Naive datetimes in code, and ambiguous defaults on model fields.
 
@@ -908,7 +980,7 @@ def datetime_audit(search_path: str | None = None) -> dict[str, Any]:
     return _guard(_datetime_audit, search_path=search_path)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def missing_indexes(search_path: str | None = None, min_occurrences: int = 1) -> dict[str, Any]:
     """Fields the code filters or sorts on that carry no index.
 
@@ -929,7 +1001,7 @@ def missing_indexes(search_path: str | None = None, min_occurrences: int = 1) ->
     return _guard(_missing_indexes, search_path=search_path, min_occurrences=min_occurrences)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def what_happens_on(model_label: str, event: str = "save", max_depth: int = 4) -> dict[str, Any]:
     """Follow the signal chain a save or delete actually triggers.
 
@@ -950,7 +1022,7 @@ def what_happens_on(model_label: str, event: str = "save", max_depth: int = 4) -
     return _guard(_what_happens_on, model_label=model_label, event=event, max_depth=max_depth)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def find_unscoped_queries(
     tenant_root: str = "auth.User",
     search_path: str | None = None,
@@ -983,7 +1055,7 @@ def find_unscoped_queries(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def deploy_safety(search_path: str | None = None, max_hits_per_symbol: int = 25) -> dict[str, Any]:
     """Is a pending destructive migration safe to deploy yet?
 
@@ -1001,7 +1073,7 @@ def deploy_safety(search_path: str | None = None, max_hits_per_symbol: int = 25)
     return _guard(_deploy_safety, search_path=search_path, max_hits_per_symbol=max_hits_per_symbol)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READS_ONLY)
 def migration_risk(include_applied: bool = False) -> dict[str, Any]:
     """Rate migrations by what they do to a live database.
 
@@ -1012,6 +1084,185 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
         include_applied: also classify migrations that already ran.
     """
     return _guard(_migration_risk, include_applied=include_applied)
+
+
+# Argument completion, for the arguments that are a label from the project.
+#
+# `what_breaks_if_i_delete` needs a model, and there are 424 of them on a real
+# project. Typing one from memory is how you get a LookupError, and a wrong
+# label is indistinguishable from a model with nothing attached to it.
+@mcp.completion()
+async def complete_argument(ref: Any, argument: Any, context: Any) -> Any:
+    """Suggest model labels where a prompt asks for one."""
+    from mcp.types import Completion
+
+    if getattr(argument, "name", None) not in {"model", "model_label"}:
+        return None
+
+    try:
+        from django.apps import apps
+
+        from .django_env import ensure_django
+
+        ensure_django()
+        labels = sorted(model._meta.label for model in apps.get_models())
+    except Exception:
+        return None
+
+    typed = (getattr(argument, "value", "") or "").lower()
+    matches = [label for label in labels if typed in label.lower()]
+    # The protocol caps a completion response at 100 values, and a list that
+    # long is not a suggestion anyway.
+    return Completion(
+        values=matches[:100],
+        total=len(matches),
+        hasMore=len(matches) > 100,
+    )
+
+
+# Prompts are the part of this server that carries the knowledge a tool
+# cannot. A tool answers one question; knowing which three questions to ask in
+# which order, and how to read the answer, is a workflow - and a workflow that
+# lives only in somebody's head gets used once.
+#
+# Each of these says what to call, in what order, and what the answer does not
+# mean. That last part is the reason they exist: the failure mode of this
+# server is an assistant reporting "no findings" from a check that could not
+# run.
+
+
+@mcp.prompt(
+    title="Is this safe to deploy?",
+    description="The migration and rolling-deploy questions, in the order they matter",
+)
+def before_deploy() -> str:
+    """The pre-deploy walkthrough."""
+    return """Work out whether the pending changes are safe to ship, in this order.
+
+1. `project_info` first. If it cannot load the project, stop and say so -
+   every "nothing found" below would be meaningless.
+
+2. `deploy_safety`. This is the one that blocks a deploy: a migration that
+   drops something the running code still uses. During a rolling deploy the
+   old pods keep serving against the new schema, so "the code is updated too"
+   is not an answer - the question is whether both versions survive the
+   window.
+
+3. `migration_risk` for the rest: a migration that locks a table for minutes,
+   or rewrites it, is not unsafe but it is an outage if nobody planned for it.
+
+4. `api_contract_check`. A field that disappeared or became required breaks
+   clients that are already deployed, and it does it silently.
+
+Report what would break, for whom, and in which of the two windows: during the
+deploy, or after it. If a check could not run, say which and why rather than
+counting it as clean."""
+
+
+@mcp.prompt(
+    title="Why is this slow?",
+    description="Trace an endpoint's cost from the queryset to the serialiser",
+)
+def why_is_this_slow(endpoint: str = "") -> str:
+    """Walk the performance path for one endpoint, or the whole project."""
+    scope = f"the endpoint or view `{endpoint}`" if endpoint else "the project"
+    return f"""Find out what {scope} actually costs, and do not guess at it.
+
+1. `endpoint_cost` for the estimate per endpoint, and read the caveat it
+   prints: it works from a view's serializer and its queryset, so a view that
+   builds its response by hand is invisible to it. The count of those is in
+   the report.
+
+2. `serializer_nplusone` and `queries_in_loops` for where the queries come
+   from. The first finds what a framework causes, the second what somebody
+   wrote by hand - including a loop that calls a function that queries, which
+   is the shape that looks clean.
+
+3. `unused_eager_loading` for the other direction: a join or prefetch that
+   nothing in the response reads is paid for and thrown away.
+
+4. `request_impact` to see whether this endpoint carries findings from other
+   checks too.
+
+Then say which single change would remove the most queries, with the number
+next to it. "Add select_related" without a count is not an answer somebody can
+prioritise."""
+
+
+@mcp.prompt(
+    title="What breaks if I delete this?",
+    description="Cascades, signals and the code that still refers to it",
+)
+def what_breaks_if_i_delete(model: str) -> str:
+    """Everything that follows from deleting one row, or one model."""
+    return f"""Work out the full consequence of deleting `{model}`, at both levels.
+
+1. `delete_impact` for `{model}`: what cascades, what blocks with PROTECT,
+   what gets nulled. It follows the chain transitively, so read the depth -
+   two hops away is still your data.
+
+2. `what_happens_on` for `{model}` with `save` and with `delete`: a receiver
+   three hops away may send mail or dispatch a task, and that is not
+   reversible by a rollback.
+
+3. If the model itself is going away rather than a row, `deploy_safety` and
+   `api_contract_check` as well: the column is referenced by code that is
+   still running, and by serializers clients depend on.
+
+Answer with the blast radius, not the mechanism: how many tables, which of
+them are irreversible, and what a rollback would not undo."""
+
+
+@mcp.prompt(
+    title="Where do I start?",
+    description="Turn a long findings list into the few endpoints that carry it",
+)
+def triage(severity: str = "high") -> str:
+    """Prioritise a full run by what a request can actually reach."""
+    return f"""There are more findings than anybody can work through in order. Sort them by
+what is reachable rather than by severity alone.
+
+1. `check` for the full list, then `request_impact` to group it. Severity ranks
+   the defect; it does not rank the risk, because risk is severity times how
+   often the code runs. A medium on a login path outranks a critical in a
+   helper nobody has called since 2021.
+
+2. Work from the endpoints that carry the most, at `{severity}` and above.
+   `request_impact` gives the call path to each finding, so the fix has a
+   location rather than a search.
+
+3. Read the `unattributed` count before concluding. Those are not clean - they
+   are findings no entry point this can see reaches, and the report separates
+   the ones that are genuinely uncalled from the ones where the caller could
+   not be resolved.
+
+Give a shortlist of endpoints in the order you would fix them, each with what
+it carries and roughly what the fix is."""
+
+
+@mcp.prompt(
+    title="Review this branch",
+    description="Only what changed against a ref, with the caveats intact",
+)
+def review_this_branch(ref: str = "main") -> str:
+    """A findings review scoped to one branch."""
+    return f"""Review only what this branch changed against `{ref}`.
+
+1. `check` with the whole project first, so you know the baseline, then
+   compare against `{ref}` - the CLI does this with `check --since {ref}`, and
+   the merge base is used so a branch that is behind `{ref}` is not blamed for
+   what `{ref}` gained.
+
+2. A finding with no file - a migration, a serializer class - cannot be placed
+   in a diff. Those are kept deliberately rather than dropped, and the count
+   is printed. Do not treat them as noise: a migration is exactly the kind of
+   change a branch review is for.
+
+3. `api_contract_check` for what this branch does to clients that are already
+   deployed.
+
+Report what this branch introduced, separately from what it merely touched,
+and say plainly if a check could not run."""
 
 
 @mcp.resource("django://models", mime_type="application/json")

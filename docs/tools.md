@@ -6,6 +6,35 @@ a typo does not take the server down.
 
 ---
 
+## Prompts
+
+A tool answers one question. Knowing which three to ask, in which order, and
+what the answer does not mean is a workflow, and a workflow that lives only in
+somebody's head gets used once. Each prompt below names the tools to call and
+ends with what to report.
+
+| Prompt | Arguments | For |
+| --- | --- | --- |
+| `before_deploy` | - | the migration and rolling-deploy questions, in order |
+| `why_is_this_slow` | `endpoint` (optional) | one endpoint's cost, from queryset to serialiser |
+| `what_breaks_if_i_delete` | `model` | cascades, signals, and the code that still refers to it |
+| `triage` | `severity` (optional) | a long list turned into the endpoints that carry it |
+| `review_this_branch` | `ref` (optional) | only what changed, with the caveats intact |
+
+The `model` argument completes from the project's own registry.
+
+## Tool annotations
+
+Every tool carries `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+`openWorldHint`, so a client can decide what needs approval without asking a
+human about each of 36 calls.
+
+35 tools are read-only. The exception is `api_contract_check`, which writes the
+snapshot when called with `update=True`; it is still non-destructive and still
+idempotent, and a client that auto-approves reads should stop and ask about
+that one.
+
+
 ## `project_info`
 
 Boots the target project and reports what it is. **Run this first when

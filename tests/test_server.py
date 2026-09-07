@@ -49,13 +49,20 @@ def tool_functions() -> dict[str, object]:
     The decorator registers them with the server; the module keeps the
     function under its own name, which is what a unit test wants.
     """
+    import asyncio
+
+    # Prompts and the completion handler live in the same module and are not
+    # tools. Asking the server which is which beats guessing from the name.
+    registered = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
+    prompts = {prompt.name for prompt in asyncio.run(server.mcp.list_prompts())}
+
     found = {}
     for name, value in vars(server).items():
         if name.startswith("_") or not inspect.isfunction(value):
             continue
         if value.__module__ != server.__name__:
             continue
-        if name in {"main"}:
+        if name in prompts or name not in registered | {"model_graph"}:
             continue
         found[name] = value
     return found
@@ -141,3 +148,87 @@ def _resource_uris() -> list[str]:
         return [r.uri for r in await server.mcp.list_resources()]
 
     return asyncio.run(gather())
+
+
+# --- the protocol surface, not just the tools ------------------------------
+
+
+def test_the_server_tells_a_client_how_to_use_it():
+    # An assistant handed 36 tools with no ordering picks by name, and the
+    # names do not say which question each answers.
+    assert server.INSTRUCTIONS
+    for expected in ("project_info", "empty result", "cannot see"):
+        assert expected in server.INSTRUCTIONS, expected
+
+
+def test_every_tool_declares_whether_it_reads_or_writes():
+    # Without this a client asks permission for each of 36 read-only calls,
+    # which is the difference between a server somebody uses while working and
+    # one they use once.
+    import asyncio
+
+    tools = asyncio.run(server.mcp.list_tools())
+    missing = [t.name for t in tools if t.annotations is None]
+    assert not missing, f"no annotations on {missing}"
+
+    writing = [t.name for t in tools if not t.annotations.read_only_hint]
+    # Exactly one tool writes: the contract snapshot, and only with update=True.
+    assert writing == ["api_contract_check"], writing
+
+    for tool in tools:
+        assert tool.annotations.destructive_hint is False, tool.name
+        assert tool.annotations.open_world_hint is False, tool.name
+
+
+def test_the_prompts_carry_the_order_the_tools_do_not():
+    import asyncio
+
+    prompts = asyncio.run(server.mcp.list_prompts())
+    names = {p.name for p in prompts}
+    assert {"before_deploy", "why_is_this_slow", "triage"} <= names, names
+    for prompt in prompts:
+        assert prompt.description, f"{prompt.name} has no description"
+
+
+def test_a_prompt_interpolates_its_argument():
+    import asyncio
+
+    result = asyncio.run(
+        server.mcp.get_prompt("what_breaks_if_i_delete", {"model": "shop.Customer"})
+    )
+    text = str(result.messages[0].content)
+    assert "shop.Customer" in text
+    # And it says the thing a tool cannot: what the answer does not mean.
+    assert "rollback" in text.lower()
+
+
+def test_every_prompt_names_at_least_one_real_tool():
+    # A workflow that references a tool that does not exist sends an assistant
+    # looking for it, which is worse than no workflow.
+    import asyncio
+    import re
+
+    tool_names = {t.name for t in asyncio.run(server.mcp.list_tools())}
+    for prompt in asyncio.run(server.mcp.list_prompts()):
+        arguments = {a.name: "x" for a in (prompt.arguments or []) if a.required}
+        text = str(
+            asyncio.run(server.mcp.get_prompt(prompt.name, arguments)).messages[0].content
+        )
+        mentioned = set(re.findall(r"`(\w+)`", text)) & tool_names
+        assert mentioned, f"{prompt.name} names no tool that exists"
+
+
+def test_a_model_argument_completes_from_the_real_project():
+    # 424 models on a real project. Typing one from memory is how you get a
+    # LookupError, and a wrong label looks the same as a model with nothing
+    # attached to it.
+    import asyncio
+    from types import SimpleNamespace
+
+    partial = SimpleNamespace(name="model", value="ord")
+    result = asyncio.run(server.complete_argument(None, partial, None))
+    assert result is not None
+    assert "shop.Order" in result.values
+
+    unrelated = SimpleNamespace(name="severity", value="h")
+    assert asyncio.run(server.complete_argument(None, unrelated, None)) is None

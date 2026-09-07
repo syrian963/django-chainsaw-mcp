@@ -4,8 +4,9 @@
 ![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
 ![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
 ![CLI commands](https://img.shields.io/badge/CLI%20commands-34-6e7681?style=for-the-badge)
+![prompts](https://img.shields.io/badge/prompts-5-8250df?style=for-the-badge)
 
-![tests](https://img.shields.io/badge/tests-314-2ea043?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-320-2ea043?style=for-the-badge)
 ![coverage](https://img.shields.io/badge/coverage-86%25-2ea043?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-f1c40f?style=for-the-badge&logo=python&logoColor=white)
 ![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-0C4B33?style=for-the-badge&logo=django&logoColor=white)
@@ -181,6 +182,32 @@ These need no Django, and no settings module — point
 
 Plus the resource `django://models`. Stable addressable data belongs in a
 resource; actions belong in tools.
+
+### The parts of the MCP surface that are not tools
+
+**Every tool declares that it reads.** 35 of the 36 carry
+`readOnlyHint`, so a client can stop asking permission for each call. The one
+exception is `api_contract_check` with `update=True`, which writes the
+snapshot and says so.
+
+**Five prompts carry the order the tools do not.** A tool answers one
+question; knowing which three to ask, in which order, and what the answer does
+*not* mean is a workflow:
+
+| Prompt | For |
+| --- | --- |
+| `before_deploy` | the migration and rolling-deploy questions, in the order they matter |
+| `why_is_this_slow` | trace one endpoint's cost from queryset to serialiser |
+| `what_breaks_if_i_delete` | cascades, signals, and the code that still refers to it |
+| `triage` | turn a long findings list into the few endpoints that carry it |
+| `review_this_branch` | only what changed against a ref, with the caveats intact |
+
+**Model arguments complete.** A real project has hundreds of models; typing
+one from memory is how you get a `LookupError`, and a wrong label looks
+exactly like a model with nothing attached to it.
+
+**The server ships instructions.** An assistant handed 36 tools with no
+ordering picks by name, and the names do not say which question each answers.
 
 Full reference: [`docs/tools.md`](docs/tools.md).
 

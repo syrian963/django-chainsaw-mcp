@@ -132,6 +132,37 @@ Everything below this heading is the history of getting there, newest first.
 
 ### Added
 
+- **The MCP server now uses the protocol rather than a corner of it.** It had
+  36 tools and one resource, and nothing else: no instructions, no
+  annotations, no prompts, no completion. All four are the difference between
+  a server that answers questions and one somebody can work with.
+- **Every tool declares whether it reads or writes.** 35 carry `readOnlyHint`,
+  `destructiveHint: false` and `idempotentHint: true`, so a client can stop
+  asking permission for each of 36 calls. The exception is
+  `api_contract_check` with `update=True`, which writes the snapshot and says
+  so.
+- **Server instructions.** An assistant handed 36 tools with no ordering picks
+  by name, and the names do not say which question each answers. The
+  instructions give the ordering, say to start with `project_info` when
+  anything looks empty, and state the thing this server fails at if nobody
+  says it: an empty result means "could not look" as often as "nothing to
+  find", and the reports say which.
+- **Five prompts**, because a tool answers one question and knowing which
+  three to ask in which order is a workflow: `before_deploy`,
+  `why_is_this_slow`, `what_breaks_if_i_delete`, `triage` and
+  `review_this_branch`. Each names the tools to call and ends with what to
+  report, including what the answer does not mean.
+- **Model arguments complete** from the project's own registry. A real project
+  has hundreds of models, typing one from memory is how you get a
+  `LookupError`, and a wrong label looks exactly like a model with nothing
+  attached to it.
+- All of it is checked twice: in process, and over the real stdio transport in
+  `client_test.py`, because declaring something in a module and it arriving on
+  the wire are different questions. `docs_check.sh` also verifies the prompt
+  count on the badge and that every prompt names a tool that exists - a
+  workflow pointing at a tool that does not is worse than no workflow.
+- `server.py` coverage 97%, total 86%, 320 tests.
+
 - Tests for the `--json`, `--since` and `--baseline` paths of the CLI, which
   are what a pipeline actually runs. `cli.py` 63% to 77%, total coverage 86%,
   314 tests.
