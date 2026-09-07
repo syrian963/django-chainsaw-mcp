@@ -50,6 +50,7 @@ finding at all.
 from __future__ import annotations
 
 import ast
+from bisect import bisect_left, bisect_right
 
 _MANAGER_NAMES = {"objects", "_default_manager"}
 
@@ -170,8 +171,10 @@ def unwind(
     return (model, used) if model else None
 
 
-def locals_in(scope: ast.AST, models: set[str]) -> dict[str, str]:
-    """Names assigned a queryset in this scope, mapped to their model.
+def _locals_from(
+    assignments: list[ast.AST], models: set[str]
+) -> dict[str, str]:
+    """Names these assignments bind to a queryset, mapped to their model.
 
     Straight-line assignment only. A name assigned from two different models
     is dropped: the alternative is picking one, and picking wrong points a
@@ -180,9 +183,7 @@ def locals_in(scope: ast.AST, models: set[str]) -> dict[str, str]:
     found: dict[str, str] = {}
     conflicting: set[str] = set()
 
-    for node in ast.walk(scope):
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
+    for node in assignments:
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         value = node.value
         if value is None:
@@ -209,6 +210,14 @@ def locals_in(scope: ast.AST, models: set[str]) -> dict[str, str]:
     return found
 
 
+def locals_in(scope: ast.AST, models: set[str]) -> dict[str, str]:
+    """Names assigned a queryset in this scope, mapped to their model."""
+    return _locals_from(
+        [n for n in ast.walk(scope) if isinstance(n, (ast.Assign, ast.AnnAssign))],
+        models,
+    )
+
+
 def _declared_model(cls: ast.ClassDef, models: set[str]) -> str | None:
     """`model = Order` in a class body, which views and viewsets declare."""
     for node in cls.body:
@@ -231,21 +240,33 @@ def _declared_model(cls: ast.ClassDef, models: set[str]) -> str | None:
 def scopes(tree: ast.AST, models: set[str]) -> list[tuple[int, int, int, str, dict, dict]]:
     """Every scope in the file as (span, start, end, kind, locals, class models).
 
-    The first version mapped every node id to its scope, which meant walking
-    each scope in full - and a node inside a nested function was visited once
-    per enclosing scope. On a real codebase that turned two checks from 22 s
-    and 20 s into 66 s and 61 s.
+    One walk of the tree, and one pass over the assignments it found.
 
-    This walks each function body exactly once, to collect its locals, and
-    leaves the lookup to a line comparison.
+    Two earlier versions were slower for the same answer. The first mapped
+    every node id to its scope, which meant walking each scope in full and
+    visiting a node inside a nested function once per enclosing scope. The
+    second fixed that but still walked the tree for classes, again for
+    functions, and once per function body for its locals - about four passes
+    per file. A profile showed `ast.walk` yielding 3.6 million nodes for a
+    project whose tree has 1.18 million, which is where the time was.
 
-    A function with no queryset locals is still recorded, with an empty dict.
-    Leaving it out let the module's locals apply inside it, which is how a
-    `qs` in one function came to resolve to another function's model.
+    Assignments are attributed to a scope by line range, which is what the
+    lookup already does for the scopes themselves.
     """
+    classes: list[ast.ClassDef] = []
+    functions: list[ast.AST] = []
+    assignments: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            classes.append(node)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.append(node)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            assignments.append(node)
+
     out: list[tuple[int, int, int, str, dict, dict]] = []
 
-    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+    for cls in classes:
         declared = _declared_model(cls, models)
         class_models: dict[str, str] = {"self": declared} if declared else {}
         # A class that writes its own get_queryset() can return anything, so
@@ -262,13 +283,25 @@ def scopes(tree: ast.AST, models: set[str]) -> list[tuple[int, int, int, str, di
         end_line = cls.end_lineno or cls.lineno
         out.append((end_line - cls.lineno, cls.lineno, end_line, "class", {}, class_models))
 
-    for fn in [n for n in ast.walk(tree)
-               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
-        end_line = fn.end_lineno or fn.lineno
-        out.append((end_line - fn.lineno, fn.lineno, end_line, "function",
-                    locals_in(fn, models), {}))
+    # Sorted once, so each function takes a slice instead of filtering the
+    # whole list. Filtering was quadratic in a file with many functions and
+    # many assignments, and one check got 18% slower on that alone.
+    assignments.sort(key=lambda node: node.lineno)
+    starts = [node.lineno for node in assignments]
 
-    out.append((10 ** 9, 0, 10 ** 9, "module", locals_in(tree, models), {}))
+    for fn in functions:
+        end_line = fn.end_lineno or fn.lineno
+        inside = assignments[
+            bisect_left(starts, fn.lineno):bisect_right(starts, end_line)
+        ]
+        # A function with no queryset locals is still recorded, with an empty
+        # dict. Leaving it out let the module's locals apply inside it, which
+        # is how a `qs` in one function came to resolve to another function's
+        # model.
+        out.append((end_line - fn.lineno, fn.lineno, end_line, "function",
+                    _locals_from(inside, models) if inside else {}, {}))
+
+    out.append((10 ** 9, 0, 10 ** 9, "module", _locals_from(assignments, models), {}))
     out.sort(key=lambda entry: entry[0])
     return out
 

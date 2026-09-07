@@ -77,15 +77,36 @@ BIN=$PWD/.venv/bin/django-chainsaw
 
 files=$(find "$WORK/bigproject" -name '*.py' | wc -l)
 echo "Files: $files"
+echo "Runs per command: ${RUNS:-3}  (RUNS=1 for a quick look)"
 echo
 
+RUNS=${RUNS:-3}
+
+# Best of RUNS, with the spread shown.
+#
+# One wall-clock run is not a measurement. Twice while working on this the
+# same code read 172 s and 326 s on a busy machine, and a real regression -
+# a cache that made every single-pass command two to three times slower -
+# was invisible in those numbers until it was measured on a quiet one.
+#
+# So each command runs RUNS times. The minimum is the closest thing to what
+# it costs when nothing else is competing, and printing the worst run next
+# to it says whether the machine was quiet enough to believe the number: a
+# spread of more than about a third means it was not.
 time_it() {
   local label="$1"; shift
-  local start end
-  start=$(date +%s%N)
-  "$@" >/dev/null 2>&1
-  end=$(date +%s%N)
-  printf '  %-26s %6s ms\n' "$label" "$(( (end - start) / 1000000 ))"
+  local start end wall best worst i
+  best=""; worst=""
+  for ((i = 0; i < RUNS; i++)); do
+    start=$(date +%s%N)
+    "$@" >/dev/null 2>&1
+    end=$(date +%s%N)
+    wall=$(( (end - start) / 1000000 ))
+    if [ -z "$best" ] || [ "$wall" -lt "$best" ]; then best=$wall; fi
+    if [ -z "$worst" ] || [ "$wall" -gt "$worst" ]; then worst=$wall; fi
+  done
+  printf "  %-26s %6s ms   (worst of %s: %s ms)\n" \
+    "$label" "$best" "$RUNS" "$worst"
 }
 
 time_it "models --short"      $BIN models --short

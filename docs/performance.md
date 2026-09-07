@@ -8,15 +8,24 @@ times the commands against it.
 
 **2822 Python files, 1500 models, 60 apps:**
 
-| Command | Time |
-| --- | --- |
-| `models --short` | 1.9 s |
-| `datetimes` | 2.1 s |
-| `deploy-safety` | 2.1 s |
-| `indexes` | 4.4 s |
-| `tenancy` | 4.9 s |
-| `explain` one model | 8.3 s |
-| `check` (everything) | **26.6 s** |
+`benchmark.sh` runs each command three times and prints the best next to the
+worst, because one wall-clock run is not a measurement:
+
+| Command | Best of 3 | Worst of 3 |
+| --- | --- | --- |
+| `models --short` | 2.8 s | 3.2 s |
+| `deploy-safety` | 2.5 s | 2.9 s |
+| `datetimes` | 2.8 s | 3.0 s |
+| `indexes` | 4.5 s | 5.7 s |
+| `tenancy` | 7.0 s | 9.8 s |
+| `explain` one model | 8.8 s | 11.9 s |
+| `check` (everything) | **33.3 s** | 44.8 s |
+
+**Read the spread before the number.** A `check` that ranges from 33 s to 45 s
+across three runs of the same code was measured on a machine that was not
+quiet, and 33 is an upper bound rather than the cost. An earlier reading on an
+idle machine gave 26.6 s. Run it yourself; `RUNS=5` if you want a firmer
+floor.
 
 ```bash
 bash benchmark.sh 60 25 45      # apps, models per app, view modules per app
@@ -25,6 +34,23 @@ bash benchmark.sh 60 25 45      # apps, models per app, view modules per app
 **That last number was 5.4 seconds when there were ten checks, and 35.6 when
 there were twenty-one.** It is 26.6 now because the twenty-one no longer parse
 the same files twenty-one times over - see the cache section below.
+
+### Why the spread matters more than the number
+
+Two things happened while working on this that are worth passing on.
+
+The first: a cache that retained every parsed tree made `check` **twice as
+slow** and every single-pass command two to three times slower, and the first
+measurements did not show it, because they came from a busy machine where the
+noise was larger than the regression.
+
+The second: the same code read 172 s and 326 s on that machine across runs, and
+CPU time there varied by 40% too - a shared box does not just deschedule your
+process, it competes for the cache your instructions need.
+
+So `benchmark.sh` takes the best of three and prints the worst beside it. If
+those two numbers are within a third of each other the floor is meaningful. If
+they are not, the machine is telling you to stop drawing conclusions.
 
 ### The generated project is kinder than a real one
 

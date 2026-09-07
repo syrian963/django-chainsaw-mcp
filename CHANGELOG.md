@@ -7,6 +7,20 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`scopes()` walks the tree once instead of four times.** It walked for
+  classes, again for functions, and once per function body for its locals. A
+  profile put `ast.walk` at 3.6 million nodes yielded for a tree with 1.18
+  million, which is where the time was. One walk now collects classes,
+  functions and assignments, and each function takes a `bisect` slice of the
+  assignments in its line range rather than filtering the whole list, which was
+  quadratic in a file with many of both.
+- **`benchmark.sh` takes the best of three runs and prints the worst next to
+  it.** One wall-clock run is not a measurement: the same code read 172 s and
+  326 s on a busy machine during this work, and a real regression was invisible
+  in those numbers. A spread wider than about a third now says so on the face
+  of the output, and `docs/performance.md` says to read the spread before the
+  number.
+
 - **A full `check` is 26.6 s instead of 35.6 s on the benchmark project.**
   Twenty checks each read and parsed the same files. One pass over 2144 files
   is 5.4 seconds and a full `ast.walk` over the result is 1.5, so the parsing
