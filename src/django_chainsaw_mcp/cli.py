@@ -751,6 +751,7 @@ def _cmd_dangling(args: argparse.Namespace) -> int:
     report = dangling_references(
         search_path=args.search_path,
         include_templates=not args.skip_templates,
+        include_tests=args.include_tests,
     )
     _emit(report, args.json)
 
@@ -1975,6 +1976,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--search-path", metavar="DIR")
     p.add_argument("--skip-templates", action="store_true",
                    help="do not read the templates themselves")
+    p.add_argument("--include-tests", action="store_true",
+                   help="also scan test modules, which run under their own settings")
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any name that will not resolve")
     p.set_defaults(func=_cmd_dangling)

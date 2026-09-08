@@ -291,7 +291,7 @@ cannot match the task. Also in the aggregate `check` as `celery`.
 ### `dangling`
 
 ```bash
-django-chainsaw dangling [--search-path DIR] [--skip-templates] [--fail-on-findings]
+django-chainsaw dangling [--search-path DIR] [--skip-templates] [--include-tests] [--fail-on-findings]
 ```
 
 URL names, template names, signal senders and Celery task names nothing will

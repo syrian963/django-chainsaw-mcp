@@ -95,11 +95,33 @@ Thirty-five lines would have hidden that. One line says it.
 - **`redirect()` with a path or a URL.** It takes a name, a path or a model
   instance, so a literal containing a slash or a scheme is left alone.
 - **A template that fails to compile.** It exists, which is the question asked.
+- **A `render` called as a method.** `render` at argument 1 is the template for
+  the shortcut `render(request, "x.html")` and the *form value* for
+  `Widget.render(name, value)`. Only the plain function call is read, and the
+  same for `render_to_response`, whose method form takes a context dict.
+- **Test modules,** by default — and not because test code is uninteresting.
+  Tests run under their own settings, so a name missing from the settings this
+  check was given may be registered under theirs. django-oscar's tests reverse
+  `catalogue:parent_detail`, which a test-only app in `tests/_site` registers
+  and the sandbox settings do not: reporting it answers a question that was
+  asked against the wrong URLconf. The report says how many modules were
+  skipped, and `--include-tests` reads them anyway.
+
+## Where a template can live
+
+Templates go through `get_template()`, so the project's own loaders decide —
+**and that is not the only engine that renders templates.** Django's form
+widgets render through the engine `FORM_RENDERER` builds, which carries
+`django/forms/templates` on its own search path and is unreachable from
+`django.template.loader` unless the project also lists `django.forms` in
+`INSTALLED_APPS`. Both engines are asked. Without that, a widget template
+including `django/forms/widgets/input.html` — a file that ships inside Django
+— was reported as a dangling reference.
 
 ## Usage
 
 ```bash
-django-chainsaw dangling [--search-path DIR] [--skip-templates] [--fail-on-findings]
+django-chainsaw dangling [--search-path DIR] [--skip-templates] [--include-tests] [--fail-on-findings]
 ```
 
 Also in the aggregate `check` as `dangling`.

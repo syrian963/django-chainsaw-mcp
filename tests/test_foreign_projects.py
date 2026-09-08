@@ -218,6 +218,97 @@ def test_the_exemption_can_still_be_turned_off(django_project):
     )
 
 
+# --- three ways `dangling` was wrong about django-oscar ---------------------
+
+
+def test_a_form_widget_template_shipped_inside_django_is_not_missing(django_project):
+    """`TEMPLATES` is not the only engine that renders templates.
+
+    Django's form widgets render through the engine `FORM_RENDERER` builds,
+    which carries `django/forms/templates` on its own path and is invisible to
+    `django.template.loader.get_template` unless the project also lists
+    `django.forms` in INSTALLED_APPS. django-oscar includes
+    `django/forms/widgets/input.html` from two of its own widget templates,
+    and both were reported as dangling references to a file that ships inside
+    Django.
+    """
+    from django_chainsaw_mcp.dangling import _template_exists
+
+    assert _template_exists("django/forms/widgets/input.html", {})
+
+
+def test_a_template_that_is_genuinely_absent_is_still_reported(django_project):
+    # The fix widens where the check looks. It must not turn into "everything
+    # exists", which would be the quiet failure.
+    from django_chainsaw_mcp.dangling import _template_exists
+
+    assert not _template_exists("shop/there_is_no_such_template.html", {})
+
+
+def test_a_render_method_on_an_object_is_not_the_django_shortcut(django_project, tmp_path):
+    """`wrapper.render("name", "value")` is a widget, not a view.
+
+    `render` is matched at argument 1, which is the template for the shortcut
+    `render(request, "x.html")` and the *form value* for
+    `Widget.render(name, value)`. django-oscar's test called the second one
+    and the check reported a missing template named "value".
+    """
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    module = tmp_path / "widgets.py"
+    module.write_text(
+        "def go(wrapper, request):\n"
+        "    wrapper.render('name', 'value')\n"
+        "    return render(request, 'shop/no_such_template.html')\n"
+    )
+    report = dangling_references(search_path=str(tmp_path), include_templates=False)
+    names = {f["name"] for f in report["findings"] if f["kind"] == "template"}
+    assert "value" not in names, "a widget's form value is not a template name"
+    assert "shop/no_such_template.html" in names, (
+        "the plain shortcut still has to be checked"
+    )
+
+
+def test_test_modules_are_skipped_and_the_report_says_how_many(django_project, tmp_path):
+    """Not noise-reduction: tests run under a different settings module.
+
+    django-oscar's tests reverse `catalogue:parent_detail`, registered by a
+    test-only app under `tests/_site`. Under the sandbox settings the check
+    was given, that name does not exist - so the finding was an answer to a
+    question asked against the wrong URLconf.
+    """
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_views.py").write_text(
+        "from django.urls import reverse\n"
+        "def test_it():\n"
+        "    reverse('shop:no_such_name_at_all')\n"
+    )
+    (tmp_path / "views.py").write_text(
+        "from django.urls import reverse\n"
+        "def go():\n"
+        "    return reverse('shop:also_no_such_name')\n"
+    )
+
+    default = dangling_references(search_path=str(tmp_path), include_templates=False)
+    names = {f["name"] for f in default["findings"]}
+    assert "shop:also_no_such_name" in names, "production code is still read"
+    assert "shop:no_such_name_at_all" not in names, "the test module is not"
+    assert default["test_files_skipped"] == 1
+    assert "under their own settings" in default["note"], (
+        "a reader has to be told the test modules were not read"
+    )
+
+    everything = dangling_references(
+        search_path=str(tmp_path), include_templates=False, include_tests=True
+    )
+    assert {"shop:also_no_such_name", "shop:no_such_name_at_all"} <= {
+        f["name"] for f in everything["findings"]
+    }
+    assert everything["test_files_skipped"] == 0
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 

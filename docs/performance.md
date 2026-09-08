@@ -112,12 +112,24 @@ DJANGO_CHAINSAW_PROJECT_PATH=. DJANGO_CHAINSAW_SETTINGS_MODULE=saleor.settings \
 **968 s of user CPU** (1069 s wall), 21 checks, none failed after the fixes,
 two correctly not applicable.
 
-That number carries the caveat. Wagtail's 1386 files cost 142 s and Saleor's
-4332 cost 968: 3.1x the files for 6.2x the time. The cost is **not linear in
-file count**, and this page should not be read as though it were. Two
-plausible causes - deeper call graphs and more relations per model, both of
-which the checks that walk them pay for - and neither has been measured, so
-neither is stated as the reason. What is measured is the ratio.
+### The cost is not linear in file count
+
+Three public projects, same command, same machine:
+
+| Project | Files | Models | User CPU | Per file |
+| --- | --- | --- | --- | --- |
+| django-oscar | 828 | 92 | 24 s | 29 ms |
+| Wagtail | 1386 | 264 | 142 s | 102 ms |
+| Saleor | 4332 | 122 | 968 s | 223 ms |
+
+Five times the files costs forty times the time, and the per-file cost climbs
+with every step. This page should not be read as though the cost were linear.
+
+Model count is clearly not the driver - Wagtail has twice Saleor's models and
+a seventh of the time - so the plausible causes are call-graph depth and
+relations per model, both of which the checks that walk them pay for. Neither
+has been measured, so neither is stated as the reason. What is measured is the
+table.
 
 ### Where the half minute goes
 

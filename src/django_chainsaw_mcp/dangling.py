@@ -66,10 +66,44 @@ _TEMPLATE_CALLS = {
     "render_to_response": 0,
 }
 
+# Of those, the ones that are only ever the Django shortcut when called as a
+# plain function. `render` is also `Widget.render(name, value)`, where the
+# second argument is a form value and not a template - django-oscar's
+# `wrapper.render("name", "value")` was reported as a missing template called
+# "value". `render_to_response` is also `TemplateResponseMixin`'s method,
+# whose first argument is a context dict.
+#
+# `get_template` and `select_template` stay permissive on purpose: they are
+# methods on an engine as often as they are functions, and the argument means
+# the same thing either way.
+_BARE_CALL_ONLY = {"render", "render_to_response"}
+
 _SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
     ".pytest_cache", "site-packages", "dist", "build",
 }
+
+_TEST_DIRS = {"tests", "testing"}
+
+
+def _is_test_file(path: Path) -> bool:
+    """A test module, under either naming convention.
+
+    Skipped by default here for a reason that is not noise-reduction: **tests
+    run under a different settings module**. django-oscar's tests reverse
+    `catalogue:parent_detail`, which is registered by a test-only app in
+    `tests/_site` and does not exist under the sandbox settings this check was
+    pointed at. The name resolves perfectly when the tests run. Reporting it
+    is not a judgement call about how interesting test code is - it is an
+    answer to a question that was asked against the wrong URLconf.
+    """
+    return (
+        any(part in _TEST_DIRS for part in path.parts)
+        or path.name == "conftest.py"
+        or path.name.startswith("test_")
+        or path.name.endswith("_test.py")
+    )
+
 
 # `{% url 'name' %}` / `{% url "name" %}`, and the same for include/extends.
 _TEMPLATE_URL = re.compile(r"{%\s*url\s+['\"]([^'\"]+)['\"]")
@@ -285,7 +319,20 @@ def _sender_strings(node: ast.AST) -> list[tuple[str, int]]:
 
 
 def _template_exists(name: str, cache: dict[str, bool]) -> bool:
-    """Whether the project's own loaders can find this template."""
+    """Whether anything that renders templates here can find this one.
+
+    `TEMPLATES` is not the whole answer. Django's form widgets render through
+    a *separate* engine built by `FORM_RENDERER`, which carries
+    `django/forms/templates` on its own search path and is not reachable from
+    `django.template.loader.get_template` unless the project also lists
+    `django.forms` in `INSTALLED_APPS`.
+
+    Asking only the configured loaders therefore reported
+    `django/forms/widgets/input.html` - a file that ships inside Django - as
+    missing, on any project whose widget templates include it. django-oscar
+    does that twice and was where this showed up. A check that calls a stock
+    Django template a dangling reference is worse than one that says nothing.
+    """
     if name not in cache:
         from django.template import TemplateDoesNotExist
         from django.template.loader import get_template
@@ -294,12 +341,40 @@ def _template_exists(name: str, cache: dict[str, bool]) -> bool:
             get_template(name)
             cache[name] = True
         except TemplateDoesNotExist:
-            cache[name] = False
+            cache[name] = _form_renderer_has(name)
         except Exception:
             # It was found and would not compile, which is a different
             # problem and not this one's to report.
             cache[name] = True
     return cache[name]
+
+
+def _form_renderer_has(name: str) -> bool:
+    """Whether the form renderer's own engine can find this template.
+
+    Returns False for a genuinely missing template and for the case where the
+    renderer has no engine to ask - a project on a custom `FORM_RENDERER` that
+    is not template-based. The second answer is the same as the first on
+    purpose: the alternative is suppressing every template finding whenever
+    this cannot be determined.
+    """
+    try:
+        from django.forms.renderers import get_default_renderer
+        from django.template import TemplateDoesNotExist
+
+        engine = getattr(get_default_renderer(), "engine", None)
+        if engine is None:
+            return False
+        try:
+            engine.get_template(name)
+        except TemplateDoesNotExist:
+            return False
+        except Exception:
+            # Found, does not compile. Same verdict as above.
+            return True
+        return True
+    except Exception:
+        return False
 
 
 def _looks_like_a_path(value: str) -> bool:
@@ -342,6 +417,7 @@ def _name_of(call: ast.Call) -> str:
 def dangling_references(
     search_path: str | None = None,
     include_templates: bool = True,
+    include_tests: bool = False,
 ) -> dict[str, Any]:
     """URL names and template names that nothing will resolve.
 
@@ -349,6 +425,9 @@ def dangling_references(
         search_path: directory to scan. Defaults to the project path.
         include_templates: also read `{% url %}`, `{% include %}` and
             `{% extends %}` out of the templates themselves.
+        include_tests: also scan test modules. Off by default because tests
+            run under their own settings, so a name missing from the settings
+            this check was given may be registered under theirs.
     """
     config = ensure_django()
 
@@ -378,8 +457,12 @@ def dangling_references(
             "fix": fix,
         })
 
+    tests_skipped = 0
     for path in sorted(root.rglob("*.py")):
         if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        if not include_tests and _is_test_file(path.relative_to(root)):
+            tests_skipped += 1
             continue
         try:
             source = read_source(path)
@@ -448,6 +531,8 @@ def dangling_references(
                     )
 
             elif name in _TEMPLATE_CALLS:
+                if name in _BARE_CALL_ONLY and not isinstance(node.func, ast.Name):
+                    continue
                 for value in _first_string(node, _TEMPLATE_CALLS[name]):
                     if not value.strip():
                         continue
@@ -558,6 +643,7 @@ def dangling_references(
         "url_names_checked": checked["url"],
         "template_names_checked": checked["template"],
         "files_scanned": files_scanned,
+        "test_files_skipped": tests_skipped,
         "templates_scanned": templates_scanned,
         "urlconf_error": url_error,
         "note": (
@@ -575,6 +661,13 @@ def dangling_references(
             "URLconf in the project is read, not only ROOT_URLCONF: a project "
             "serving two sites picks the URLconf per request, and the names in "
             "the other one reverse perfectly at runtime."
+            + (
+                f" {tests_skipped} test module(s) were not read: tests run "
+                "under their own settings, so a name missing from these ones "
+                "may be registered under theirs. Pass include_tests to scan "
+                "them anyway."
+                if tests_skipped else ""
+            )
             + (
                 f" The URLconf could not be fully read ({url_error}), so URL "
                 "names were not checked and their absence here means nothing."

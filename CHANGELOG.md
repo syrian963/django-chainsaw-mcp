@@ -16,6 +16,33 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **A template that ships inside Django was reported as missing.** Form
+  widgets render through the engine `FORM_RENDERER` builds, which carries
+  `django/forms/templates` on its own search path and is unreachable from
+  `django.template.loader.get_template` unless the project also lists
+  `django.forms` in `INSTALLED_APPS`. django-oscar includes
+  `django/forms/widgets/input.html` from two of its widget templates and both
+  came back dangling. Both engines are asked now. A check that calls a stock
+  Django template a broken reference is worse than one that says nothing.
+- **`wrapper.render("name", "value")` was read as a missing template called
+  "value".** Argument 1 of `render` is the template for the shortcut
+  `render(request, "x.html")` and the form value for
+  `Widget.render(name, value)`; only the plain function call is read now, and
+  the same for `render_to_response`, whose `TemplateResponseMixin` form takes
+  a context dict.
+- **`dangling` scanned test modules, which run under different settings.**
+  Not a judgement about how interesting test code is: django-oscar's tests
+  reverse `catalogue:parent_detail`, registered by a test-only app under
+  `tests/_site` and absent from the sandbox settings the check was pointed at.
+  The name resolves perfectly when the tests run, so reporting it answered a
+  question asked against the wrong URLconf. Skipped by default, counted in the
+  report as `test_files_skipped` with the reason in the note, and
+  `--include-tests` / `include_tests=True` reads them anyway. On django-oscar
+  the three fixes together take the check from 5 findings to 0, and
+  `--include-tests` still shows the 2 that are real under other settings.
+
+### Fixed
+
 - **A ternary in a signal receiver took down the whole check.** `ast.If.body`
   is a list of statements and `ast.IfExp.body` is a single expression, and
   both were read as a list, so `x = a if cond else b` raised
@@ -199,6 +226,17 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A third public project, and a scaling table instead of a claim.**
+  django-oscar - 828 files, 92 models, server-rendered where the other two are
+  headless, so `n+1-template` fired for the first time on real code. All 21
+  checks green, 260 findings, 24 s of CPU. `docs/performance.md` now carries
+  all three runs side by side: 828 files at 29 ms each, 1386 at 102 ms, 4332
+  at 223 ms. Five times the files is forty times the time, and model count is
+  visibly not the driver - Wagtail has twice Saleor's models and a seventh of
+  the time. The causes are not measured and so are not claimed; the table is.
 
 ### Added
 

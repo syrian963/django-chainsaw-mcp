@@ -757,6 +757,7 @@ def choice_typos(
 def dangling_references(
     search_path: str | None = None,
     include_templates: bool = True,
+    include_tests: bool = False,
 ) -> dict[str, Any]:
     """URL names and template names that nothing will resolve.
 
@@ -782,11 +783,15 @@ def dangling_references(
         search_path: directory to scan. Defaults to the configured project.
         include_templates: also read `{% url %}`, `{% include %}` and
             `{% extends %}` out of the templates.
+        include_tests: also scan test modules. Off by default: tests run under
+            their own settings, so a name missing from these ones may be
+            registered under theirs.
     """
     return _guard(
         _dangling_references,
         search_path=search_path,
         include_templates=include_templates,
+        include_tests=include_tests,
     )
 
 
