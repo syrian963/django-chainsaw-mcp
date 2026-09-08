@@ -70,6 +70,30 @@ code. Wall clock on a contended box measures the box. The benchmark above is
 the repeatable figure and the one to compare releases against; treat the 270
 seconds as an order of magnitude, not a measurement.
 
+### A public project anyone can repeat
+
+The figure above comes from a codebase that cannot be shared, which makes it
+an assertion rather than evidence. So the same run was done against
+[Wagtail](https://github.com/wagtail/wagtail), which anyone can clone:
+
+```bash
+git clone --depth 1 https://github.com/wagtail/wagtail.git
+cd wagtail && uv venv && uv pip install -e ".[testing]" django-chainsaw-mcp
+DJANGO_CHAINSAW_PROJECT_PATH=. DJANGO_CHAINSAW_SETTINGS_MODULE=wagtail.test.settings \
+  django-chainsaw check
+```
+
+1386 Python files, 264 models, 21 checks: **142 s of user CPU** (171 s wall),
+0 checks failed, 427 findings. Two checks reported that they do not apply -
+no FastAPI, no SQLAlchemy - which is the intended answer rather than a gap.
+
+The run is also the honest test of the false-positive rate, because nothing in
+Wagtail was written with this tool in mind. It found one defect in the tool
+immediately: 11 of the 41 apps it called the project's own were Django
+contrib, DRF, taggit and django-filters, installed into a `.venv` **inside**
+the project directory. Everything under the root is not everything that is
+yours, and the fix is in the changelog.
+
 ### Where the half minute goes
 
 Each check on its own, on the same project. Every one of these includes about

@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from .django_env import ensure_django
-from .project import parse_file, read_source
+from .project import is_vendored, parse_file, read_source
 
 _DESTRUCTIVE = {
     "RemoveField": "field",
@@ -174,11 +174,18 @@ def _symbol_for(operation: Any, kind: str) -> str | None:
 
 
 def _project_app_labels(root: Path) -> set[str]:
-    """Apps whose code lives under the search path.
+    """Apps whose code lives under the search path and is actually the project.
 
     Django's own contenttypes and auth migrations are not deploy decisions the
     user makes, and their field names are generic enough that scanning for them
     produces nothing but noise.
+
+    "Under the root" alone does not answer that. A virtualenv at `.venv/` is
+    the normal layout, so every installed package also lives under the root:
+    on Wagtail, 11 of the 41 apps this returned were Django contrib, DRF,
+    taggit and friends, and their destructive migrations were reported as
+    critical against a `RemoveField` for a field called `name` that 25 unrelated
+    places happened to mention.
     """
     from django.apps import apps
 
@@ -188,8 +195,11 @@ def _project_app_labels(root: Path) -> set[str]:
             path = Path(config.path).resolve()
         except (TypeError, OSError):
             continue
-        if path == root or root in path.parents:
-            labels.add(config.label)
+        if path != root and root not in path.parents:
+            continue
+        if is_vendored(path.relative_to(root) if path != root else path):
+            continue
+        labels.add(config.label)
     return labels
 
 

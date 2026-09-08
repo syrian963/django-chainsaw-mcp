@@ -16,6 +16,22 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **A virtualenv inside the project directory made every installed package
+  look like one of the project's own apps.** `deploy_safety` asked only
+  whether an app's path was under the project root, and with the normal
+  `.venv/` layout everything installed is. On Wagtail that made 11 of 41 apps
+  wrong - Django contrib, DRF, taggit, django-filters - and produced a
+  critical verdict on `contenttypes/0002_remove_content_type_name`: a
+  `RemoveField` for a field called `name`, matched against 25 unrelated places
+  that use that word. The function's own docstring had said since it was
+  written that third-party field names are too generic to scan for; the guard
+  just did not hold. `project.is_vendored` is now the one place that answers
+  "under the root, but not ours", and the regression test was shown red before
+  green. On Wagtail: 14 blocking findings became 13, and `contenttypes` moved
+  to `skipped_third_party_apps` where it belongs.
+
+### Fixed
+
 - **The tests badge read 320 while the suite collected 329, and nothing
   checked it.** Every other number on that row is derived from the code by
   `docs_check.sh`; this one and the coverage figure were typed. Both are gated
@@ -156,6 +172,16 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A repeatable run against a public project.** Every performance and
+  false-positive claim here came either from a generated benchmark or from a
+  codebase that cannot be shared, which makes both assertions rather than
+  evidence. `docs/performance.md` now carries the commands to run the tool
+  against Wagtail - 1386 files, 264 models, 142 s of user CPU, 0 checks
+  failed, 427 findings - so the numbers can be reproduced by anyone. It paid
+  for itself on the first run by exposing the vendored-app bug above.
 
 ### Added
 

@@ -46,10 +46,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_SKIP_DIRS = {
+# Directories that are inside the project tree without being the project.
+# A virtualenv at `.venv/` is the normal layout, and everything installed into
+# it sits under the project path - so "is this path under the root" is not the
+# same question as "is this ours", and anything asking the second one has to
+# come through here.
+SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache",
     ".pytest_cache", "site-packages", "dist", "build",
 }
+
+# Kept for the readers that already import the private name.
+_SKIP_DIRS = SKIP_DIRS
+
+
+def is_vendored(path: Path) -> bool:
+    """True when a path is inside the tree but not part of the project.
+
+    Wagtail installs its dependencies into `/tmp/wag/.venv`, so Django's own
+    `contenttypes` reports an app path with the project root in its parents.
+    Treating that as one of the project's own apps put third-party migrations
+    into a deploy report they were explicitly meant to stay out of.
+    """
+    return any(part in SKIP_DIRS for part in path.parts)
 
 # Top-level module name -> the framework it means. Matched on the first
 # segment of an import, so `fastapi.responses` counts as fastapi.
