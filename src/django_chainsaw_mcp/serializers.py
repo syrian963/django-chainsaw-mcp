@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .discovery import load_serializer_modules
+from .discovery import binding_site, load_serializer_modules, serializer_label
 from .django_env import ensure_django
 
 # Names that are almost never meant to leave the server.
@@ -62,7 +62,11 @@ def _serializer_classes() -> list[Any]:
             if id(subclass) in seen:
                 continue
             seen.add(id(subclass))
-            found.append(subclass)
+            # A class the project binds nowhere is a subset built and used
+            # inline: no file to send anybody to, and the finding against the
+            # class it was built from already says the same thing.
+            if binding_site(subclass) is not None:
+                found.append(subclass)
             walk(subclass)
 
     walk(drf.ModelSerializer)
@@ -108,7 +112,7 @@ def serializer_exposure(include_safe: bool = False) -> dict[str, Any]:
 
         declared = getattr(meta, "fields", None)
         excluded = getattr(meta, "exclude", None)
-        label = f"{cls.__module__}.{cls.__qualname__}"
+        label = serializer_label(cls)
         model_label = model._meta.label
 
         concrete = [

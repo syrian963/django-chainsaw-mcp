@@ -143,6 +143,28 @@ A field called `token` might be a public share link. A field called `notes`
 might hold medical history and will not be flagged, because nothing in the name
 says so. The categories are a prompt for a human, not a verdict.
 
+
+## A serializer built at runtime is named by where you can find it
+
+`ModelSerializer.__subclasses__()` returns classes made with `type()` as well
+as classes somebody wrote. Misago narrows a serializer's field list that way,
+in `misago/core/serializers.py`, and the result claims `__module__` as
+wherever the factory happened to run — `rest_framework.serializers` — under a
+name made of every field it keeps:
+
+    AuthenticatedUserSerializerIdUsernameSlugEmailJoinedOnRank...Subset
+
+Two rules, and the order matters:
+
+- **A class the project binds somewhere is reported, whatever `__module__`
+  says,** under the name it is bound as. Misago serves that class as
+  `AuthenticatedUserSerializer` from `misago/users/serializers/auth.py`, and
+  that string can be opened in an editor. Judging it by `__module__` instead
+  suppressed a real finding about the fields it exposes.
+- **A class the project binds nowhere is skipped.** A subset built and used
+  inline has no file to send anybody to, and the finding against the class it
+  was built from already says the same thing.
+
 ## What it cannot see
 
 - Fields whose exposure depends on the request, since the check sees the class

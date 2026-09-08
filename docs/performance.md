@@ -122,24 +122,28 @@ Three public projects, same command, same machine:
 | django-tenants | 207 | 10 | 3.7 s | 18 ms |
 | django-oscar | 828 | 92 | 24 s | 29 ms |
 | Wagtail | 1386 | 264 | 142 s | 102 ms |
+| Misago | 2025 | 53 | 161 s | 79 ms |
 | Saleor | 4332 | 122 | 968 s | 223 ms |
 
-Read the per-file column from django-oscar down. The two smallest projects are
-mostly Django boot - about two seconds of it, which is over half of channels'
-total - so dividing by 55 files measures the boot, not the analysis. That is
-also why channels looks more expensive per file than a project four times its
-size.
+The two smallest rows are mostly Django boot - about two seconds of it, which
+is over half of channels' total - so dividing by 55 files measures the boot
+rather than the analysis, and channels looks dearer per file than a project
+four times its size. The per-file column means something from a few hundred
+files up.
 
-Above a few hundred files the boot stops mattering and the shape is clear:
-five times the files from django-oscar to Saleor costs forty times the time,
-and the per-file cost climbs at every step. This page should not be read as
-though the cost were linear.
+Above that, the honest summary is that **the cost is not linear in file count
+and no single measured variable explains it**. Five times the files from
+django-oscar to Saleor costs forty times the time. But the per-file cost does
+not climb monotonically: Misago has half again as many files as Wagtail and is
+cheaper per file, and Wagtail has five times Misago's models and twice
+Saleor's while costing a seventh of Saleor's time. Neither file count nor
+model count is the driver on its own.
 
-Model count is clearly not the driver - Wagtail has twice Saleor's models and
-a seventh of the time - so the plausible causes are call-graph depth and
-relations per model, both of which the checks that walk them pay for. Neither
-has been measured, so neither is stated as the reason. What is measured is the
-table.
+The plausible causes are call-graph depth and relations per model, both of
+which the checks that walk them pay for. Neither has been measured, so neither
+is stated as the reason - and with six projects the table is now good enough
+to say plainly that a projection from file count alone will be wrong. Budget
+from a project of comparable shape, or measure yours.
 
 ### Where the half minute goes
 

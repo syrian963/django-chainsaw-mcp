@@ -12,6 +12,7 @@ code rather than one.
 from __future__ import annotations
 
 import ast
+from pathlib import Path
 
 import pytest
 
@@ -558,6 +559,110 @@ def test_the_hint_does_not_walk_the_whole_tree(monkeypatch, tmp_path):
     (deep / "conftest.py").write_text("settings.configure()\n")
 
     assert "no settings module to point at" not in _boot_error(monkeypatch, tmp_path)
+
+
+# --- serializers a factory built at runtime --------------------------------
+
+
+def _subset_of(base, *fields):
+    """Misago's own pattern, reduced: a narrowed serializer made with type().
+
+    `misago/core/serializers.py` does exactly this, and the resulting class
+    reports `__module__` as wherever the factory lives rather than where the
+    project binds the result.
+    """
+
+    class Meta(base.Meta):
+        pass
+
+    Meta.fields = list(fields)
+    name = base.__name__ + "".join(f.title() for f in fields) + "Subset"
+    return type(name, (base,), {"Meta": Meta})
+
+
+def test_a_class_the_project_binds_is_found_whatever_module_it_claims(django_project):
+    """The predicate that replaced a wrong one.
+
+    The first version asked whether the class was bound in the module its
+    `__module__` names. Misago's factory calls `type()` from a mixin, so a
+    served serializer claims `rest_framework.serializers` - and the check
+    suppressed a real finding about the fields it exposes. Being bound
+    somewhere in the project is the question; `__module__` is not.
+    """
+    import sys
+
+    from django_chainsaw_mcp.discovery import binding_site
+
+    module = sys.modules[__name__]
+    generated = type("GeneratedThing", (), {})
+    generated.__module__ = "rest_framework.serializers"
+
+    assert binding_site(generated) is None, "bound nowhere yet"
+
+    module.GeneratedThing = generated
+    try:
+        site = binding_site(generated)
+        assert site is not None, "a class bound in a project module is findable"
+        assert site.endswith(".GeneratedThing")
+    finally:
+        del module.GeneratedThing
+
+
+def test_the_label_is_the_binding_site_when_they_disagree(django_project):
+    import sys
+
+    from django_chainsaw_mcp.discovery import serializer_label
+
+    module = sys.modules[__name__]
+    generated = type("UserSerializerIdUsernameEmailSubset", (), {})
+    generated.__module__ = "rest_framework.serializers"
+    module.ReadableName = generated
+    try:
+        label = serializer_label(generated)
+        assert label.endswith(".ReadableName"), (
+            f"a hundred-character generated name is not somewhere to go: {label}"
+        )
+    finally:
+        del module.ReadableName
+
+
+def test_an_ordinary_class_is_labelled_the_ordinary_way(django_project):
+    from django_chainsaw_mcp.discovery import serializer_label
+
+    assert serializer_label(_Ordinary).endswith("._Ordinary")
+
+
+class _Ordinary:
+    pass
+
+
+def test_a_serializer_bound_nowhere_is_skipped_by_the_exposure_check(django_project):
+    """Built and used inline, so there is no file to send anybody to.
+
+    The finding against the class it was built from already says the same
+    thing, and reporting both counts one defect twice.
+    """
+    from rest_framework import serializers as drf
+
+    from django_chainsaw_mcp.discovery import binding_site
+    from django_chainsaw_mcp.serializers import serializer_exposure
+
+    class Declared(drf.ModelSerializer):
+        class Meta:
+            from django.contrib.auth.models import User
+
+            model = User
+            fields = ("id", "username", "password")
+
+    # The subset has to keep the sensitive field, or the exposure check has
+    # nothing to say about it and the test passes whether it is skipped or not.
+    inline = _subset_of(Declared, "id", "password")
+    assert binding_site(inline) is None, "the subset is bound nowhere"
+
+    labels = {f["serializer"] for f in serializer_exposure()["findings"]}
+    assert not any("Subset" in label for label in labels), (
+        f"a runtime subset reached the report: {sorted(labels)}"
+    )
 
 
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):

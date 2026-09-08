@@ -16,6 +16,27 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **A serializer built at runtime was reported twice, under a name nobody can
+  open.** `ModelSerializer.__subclasses__()` returns classes made with
+  `type()` as well as classes somebody wrote. Misago narrows a field list that
+  way, and the result claims `__module__` as wherever the factory ran -
+  `rest_framework.serializers` - under a name made of every field it keeps:
+  `AuthenticatedUserSerializerIdUsernameSlugEmailJoinedOn...Subset`. Now a
+  class the project binds anywhere is reported under the name it is bound as,
+  and a class bound nowhere is skipped: no file to send anybody to, and the
+  finding against the class it was built from says the same thing. Misago goes
+  from 2 exposure findings to 1, and from 6 serializer N+1 findings to 5, with
+  no unreadable names left in either.
+
+  The first attempt at this was **wrong in the direction that matters** and is
+  worth recording: it asked whether the class was bound in the module its
+  `__module__` names, which for Misago's factory is `rest_framework` - so it
+  suppressed a genuine finding about the sensitive fields that serializer
+  exposes. A check that removes a real finding is worse than one that adds a
+  false one, and the second version asks the question that was actually meant.
+
+### Fixed
+
 - **"You did not set the variable" sent people after a file nobody wrote.**
   A library often has no settings module at all: django-rest-framework
   configures Django in `tests/conftest.py` with `settings.configure(...)`,
@@ -281,6 +302,20 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A sixth public project, and the first real DRF application.** Misago -
+  2025 files, 53 models, DRF 3.14, Celery - is where `serializers` and
+  `n+1-serializer` fired on real code for the first time; six projects in,
+  those two had never produced a finding outside the demo. All 21 checks
+  green. `docs/performance.md` has six rows now and a correction to go with
+  them: the per-file cost is **not** monotone in file count. Misago has half
+  again as many files as Wagtail and is cheaper per file; Wagtail has five
+  times Misago's models and twice Saleor's while costing a seventh of Saleor's
+  time. Neither file count nor model count is the driver on its own, and the
+  page now says a projection from file count alone will be wrong instead of
+  implying a curve.
 
 ### Added
 

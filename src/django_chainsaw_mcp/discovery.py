@@ -50,6 +50,65 @@ _SKIP_DIRS = {
 _loaded: dict[str, dict[str, Any]] = {}
 
 
+def binding_site(cls: Any, project_root: Path | None = None) -> str | None:
+    """Where the project binds this class, as `module.Name`, or None.
+
+    `__subclasses__()` returns classes built at runtime as well as written
+    ones, and the two need telling apart - but not by asking whether
+    `__module__` agrees.
+
+    Misago builds narrowed serializers with `type(name, (cls,), ...)` from a
+    mixin, so the generated class reports `__module__` as
+    `rest_framework.serializers` and carries a name made of every field it
+    keeps:
+
+        AuthenticatedUserSerializerIdUsernameSlugEmailJoinedOnRank...Subset
+
+    That class is nevertheless bound as `AuthenticatedUserSerializer` in
+    `misago/users/serializers/auth.py` and served from there. Judging it by
+    `__module__` suppressed a real finding about the fields it exposes.
+
+    So the question asked here is where the project binds the object, which is
+    also the name worth printing: a reader can open that file. A class bound
+    nowhere - a subset built and used inline - returns None, and the caller
+    skips it, because there is no file to send anybody to.
+    """
+    import sys
+
+    prefix = None
+    if project_root is not None:
+        prefix = project_root.name
+
+    fallback = None
+    for module_name, module in list(sys.modules.items()):
+        if module is None or module_name.startswith("django.") or module_name == "django":
+            continue
+        if module_name.startswith("rest_framework"):
+            continue
+        try:
+            names = vars(module)
+        except TypeError:  # pragma: no cover - exotic module objects
+            continue
+        for attribute, value in list(names.items()):
+            if value is not cls:
+                continue
+            site = f"{module_name}.{attribute}"
+            if prefix and module_name.split(".")[0] == prefix:
+                return site
+            fallback = fallback or site
+    return fallback
+
+
+def serializer_label(cls: Any) -> str:
+    """The name to print for a serializer class.
+
+    Where the project binds it when that is known, and `__module__` plus the
+    class name otherwise. The two differ exactly when the class was built at
+    runtime, which is when the second one is unreadable.
+    """
+    return binding_site(cls) or f"{cls.__module__}.{cls.__qualname__}"
+
+
 def _module_name(path: Path, root: Path) -> str:
     relative = path.relative_to(root).with_suffix("")
     parts = list(relative.parts)

@@ -30,7 +30,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from .discovery import load_serializer_modules
+from .discovery import binding_site, load_serializer_modules, serializer_label
 from .django_env import ensure_django
 
 
@@ -99,7 +99,7 @@ def _walk_serializer(
     except Exception as exc:  # a serializer that needs context to instantiate
         return [
             {
-                "serializer": f"{cls.__module__}.{cls.__qualname__}",
+                "serializer": serializer_label(cls),
                 "unreadable": f"{type(exc).__name__}: {exc}",
                 "depth": depth,
             }
@@ -110,7 +110,7 @@ def _walk_serializer(
     for name, field in fields.items():
         source = getattr(field, "source", None) or name
         entry_base = {
-            "serializer": f"{cls.__module__}.{cls.__qualname__}",
+            "serializer": serializer_label(cls),
             "model": model._meta.label,
             "field": name,
             "source": source,
@@ -207,7 +207,11 @@ def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
             if id(subclass) in seen_classes:
                 continue
             seen_classes.add(id(subclass))
-            roots.append(subclass)
+            # A class the project binds nowhere is a subset built and used
+            # inline: no file to send anybody to, and the finding against the
+            # class it was built from already says the same thing.
+            if binding_site(subclass) is not None:
+                roots.append(subclass)
             collect(subclass)
 
     collect(drf.ModelSerializer)
@@ -216,7 +220,7 @@ def serializer_nplusone(max_depth: int = 3) -> dict[str, Any]:
     unreadable: list[dict[str, Any]] = []
 
     for cls in roots:
-        root_name = f"{cls.__module__}.{cls.__qualname__}"
+        root_name = serializer_label(cls)
         for entry in _walk_serializer(cls, 0, max_depth, set(), config.project_path):
             entry.setdefault("root_serializer", root_name)
             if entry.get("unreadable"):
