@@ -1337,6 +1337,29 @@ def _cmd_check(args: argparse.Namespace) -> int:
             for name in report["checks_failed"]:
                 print(f"  {name}: {ran[name]['error']}")
 
+        # A check that found nothing is the one worth explaining. "0 findings"
+        # reads as clean and can equally mean the check found nothing to look
+        # at - on a 2025-file project with Celery in it, `celery` reported 0
+        # because all 41 dispatches pass identifiers, which is a different
+        # sentence from "there are no tasks here".
+        clean = [
+            (name, state.get("examined") or {})
+            for name, state in sorted(ran.items())
+            if state["ok"] and not state["findings"]
+        ]
+        if clean:
+            print()
+            print("These checks ran and found nothing. What each one looked at:")
+            for name, examined in clean:
+                if examined:
+                    detail = ", ".join(
+                        f"{key.replace('_', ' ')} {value}"
+                        for key, value in examined.items()
+                    )
+                else:
+                    detail = "does not report its coverage - this zero cannot be read"
+                print(f"  {name}: {detail}")
+
         if args.sarif:
             print()
             print(f"SARIF written to {args.sarif}")

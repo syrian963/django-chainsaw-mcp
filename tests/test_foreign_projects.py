@@ -665,6 +665,85 @@ def test_a_serializer_bound_nowhere_is_skipped_by_the_exposure_check(django_proj
     )
 
 
+# --- a zero that can be read -----------------------------------------------
+
+
+def test_every_check_reports_what_it_looked_at(django_project):
+    """`findings: 0` reads as clean and can mean the check saw nothing.
+
+    `celery` reported nothing on Misago - 2025 files with Celery in them - and
+    the merged report said `findings: 0`. The check itself knew the
+    difference: 12 tasks, 41 dispatches, not one handed a model instance. That
+    is a clean zero, and the aggregate had thrown the evidence away, while the
+    server's own instructions promise a client that an empty result says which
+    kind it is.
+    """
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(tenant_root="shop.Customer")
+    silent = [
+        name
+        for name, state in report["checks_run"].items()
+        if state["ok"] and not state.get("examined")
+    ]
+    assert not silent, (
+        f"these checks ran without saying what they looked at, so a zero from "
+        f"them cannot be read: {sorted(silent)}"
+    )
+
+
+def test_coverage_counts_are_not_finding_counts(django_project):
+    # The four checks that count with `_count` are listed by hand, because the
+    # same suffix also names results. Picking up `finding_count` would make
+    # every zero look examined.
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(tenant_root="shop.Customer")
+    for name, state in report["checks_run"].items():
+        examined = state.get("examined") or {}
+        assert "finding_count" not in examined, name
+        assert not any(key.startswith("high_severity") for key in examined), name
+
+
+def test_the_celery_zero_on_a_project_with_tasks_is_a_clean_one(django_project, tmp_path):
+    """The shape Misago has: tasks, dispatches, and identifiers passed.
+
+    This is the case the aggregate could not distinguish from "no tasks here".
+    """
+    from django_chainsaw_mcp.celery_tasks import celery_arguments
+
+    (tmp_path / "tasks.py").write_text(
+        "from celery import shared_task\n\n"
+        "@shared_task\n"
+        "def send_confirmation(order_id):\n"
+        "    pass\n"
+    )
+    (tmp_path / "views.py").write_text(
+        "from .tasks import send_confirmation\n\n"
+        "def place(order):\n"
+        "    send_confirmation.delay(order.pk)\n"
+    )
+
+    report = celery_arguments(search_path=str(tmp_path))
+    assert report["finding_count"] == 0
+    assert report["tasks_found"] == 1
+    assert report["dispatches_checked"] >= 1, (
+        "the dispatch has to be counted, or the zero is indistinguishable "
+        "from a project with no Celery in it"
+    )
+
+
+def test_a_project_with_no_tasks_at_all_says_so(django_project, tmp_path):
+    from django_chainsaw_mcp.celery_tasks import celery_arguments
+
+    (tmp_path / "views.py").write_text("def place(order):\n    return order\n")
+
+    report = celery_arguments(search_path=str(tmp_path))
+    assert report["finding_count"] == 0
+    assert report["tasks_found"] == 0
+    assert report["dispatches_checked"] == 0
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 

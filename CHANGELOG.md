@@ -16,6 +16,21 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **The aggregate threw away the evidence that makes a zero readable.** Every
+  individual check reports what it looked at - `tasks_found`,
+  `dispatches_checked`, `files_scanned` - and `run_all` reduced all of it to
+  `findings: 0`, which reads as clean and can equally mean the check found
+  nothing to look at. The server's own instructions promise a client that an
+  empty result says which kind it is; that was true of the checks and false of
+  the thing that merges them.
+
+  `checks_run[name]["examined"]` now carries those counters, and
+  `django-chainsaw check` prints them for every check that ran clean. A check
+  that does not report its own coverage is named as such rather than listed as
+  clean, because that zero cannot be read either way.
+
+### Fixed
+
 - **A serializer built at runtime was reported twice, under a name nobody can
   open.** `ModelSerializer.__subclasses__()` returns classes made with
   `type()` as well as classes somebody wrote. Misago narrows a field list that
@@ -302,6 +317,15 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **An answer to why `celery` had never reported anything.** Six projects, no
+  findings, which looked like a check that did not work. It works: on Misago -
+  2025 files with Celery in them - it reads 12 tasks and 41 dispatches and
+  every one passes an identifier rather than a model instance. That is a clean
+  zero and the correct answer. The investigation found no defect in the check
+  and one in the aggregate, above.
 
 ### Added
 

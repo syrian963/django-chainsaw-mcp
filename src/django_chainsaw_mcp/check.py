@@ -490,6 +490,54 @@ def _applicable(name: str, profile: Any) -> tuple[bool, str]:
 ALL_CHECKS = tuple(_CHECKS)
 
 
+# Keys that say what a check looked at, rather than what it found.
+#
+# `celery` reported nothing on a 2025-file project with Celery in it, and the
+# aggregate said `findings: 0` - which reads as "clean" and could equally have
+# meant "found no tasks at all". The individual check knew the difference all
+# along: 12 tasks, 41 dispatches, none of them handed a model instance. That
+# is a clean zero, and the merged report threw the evidence away.
+#
+# This repository's own instruction to a client is that an empty result is not
+# the same as a clean one and that every check says which. That was true of
+# the checks and false of the thing that merges them.
+_COVERAGE_SUFFIXES = ("_checked", "_scanned", "_seen", "_found")
+
+# Four checks count with `_count` instead, where the same suffix also names
+# results. Listing them beats guessing which `_count` is coverage and which is
+# a finding.
+_COVERAGE_KEYS = {
+    "migrations": ("migration_count",),
+    "n+1-serializer": ("serializer_count",),
+    "serializers": ("serializer_count",),
+    "sqla": ("models_with_relationships", "relationship_count"),
+}
+
+
+def _examined(name: str, report: dict[str, Any]) -> dict[str, int]:
+    """What this check looked at, as far as its own report says.
+
+    Empty when the check does not say - which is itself worth seeing, because
+    it marks a zero nobody can interpret.
+    """
+    if not isinstance(report, dict):
+        return {}
+    explicit = _COVERAGE_KEYS.get(name)
+    if explicit:
+        return {
+            key: report[key]
+            for key in explicit
+            if isinstance(report.get(key), int) and not isinstance(report.get(key), bool)
+        }
+    return {
+        key: value
+        for key, value in report.items()
+        if isinstance(value, int)
+        and not isinstance(value, bool)
+        and key.endswith(_COVERAGE_SUFFIXES)
+    }
+
+
 def run_all(
     tenant_root: str = "auth.User",
     only: list[str] | None = None,
@@ -563,7 +611,11 @@ def run_all(
             report = fn(**build_kwargs(options))
             produced = adapt(report)
             findings.extend(produced)
-            ran[name] = {"ok": True, "findings": len(produced)}
+            ran[name] = {
+                "ok": True,
+                "findings": len(produced),
+                "examined": _examined(name, report),
+            }
         except Exception as exc:
             ran[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
@@ -589,7 +641,11 @@ def run_all(
             "Merged output from several candidate-producing analyses. Each "
             "carries its own limits, documented with the individual tool. A "
             "check that could not run is listed in checks_failed rather than "
-            "being counted as clean."
+            "being counted as clean. A check that ran and found nothing "
+            "carries `examined`: what it looked at, so a zero can be read as "
+            "clean rather than blind. An empty `examined` means the check "
+            "does not report its own coverage, and that zero cannot be "
+            "interpreted either way."
             + (f" {len(failed)} check(s) failed to run." if failed else "")
         ),
     }

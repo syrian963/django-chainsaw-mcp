@@ -364,3 +364,36 @@ def test_an_unset_project_path_is_an_error_with_the_variable_named(capsys, monke
     assert code != EXIT_OK
     combined = capsys.readouterr()
     assert "DJANGO_CHAINSAW" in (combined.out + combined.err)
+
+
+def test_a_clean_check_prints_what_it_looked_at(django_project, monkeypatch, capsys):
+    """The branch a real run cannot easily reach.
+
+    Every check finds something on the demo project, so the "ran and found
+    nothing" block never prints there - which is exactly the kind of printer
+    branch this file exists for. A real report is taken and its `checks_run`
+    replaced, so every other key the printer reaches for is genuine.
+    """
+    from django_chainsaw_mcp import cli as cli_module
+    from django_chainsaw_mcp.check import run_all
+
+    real = run_all(tenant_root="shop.Customer", only=["money"])
+    real["checks_run"] = {
+        "celery": {"ok": True, "findings": 0,
+                   "examined": {"tasks_found": 12, "dispatches_checked": 41}},
+        "money": {"ok": True, "findings": 0, "examined": {}},
+        "loops": {"ok": True, "findings": 1, "examined": {"files_scanned": 9}},
+    }
+    real["checks_failed"] = []
+    monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)
+
+    run("check")
+    printed = capsys.readouterr().out
+
+    assert "ran and found nothing" in printed, printed[-800:]
+    assert "celery: tasks found 12, dispatches checked 41" in printed, printed
+    # A check that does not report its coverage must be named as such rather
+    # than listed as clean.
+    assert "money: does not report its coverage" in printed, printed
+    # A check that found something belongs in the findings, not in this block.
+    assert "loops:" not in printed.split("ran and found nothing")[1]

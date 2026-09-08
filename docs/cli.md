@@ -41,6 +41,22 @@ The count of those is printed with the rest.
 Runs every analysis whose findings are defects, merges them into one list sorted
 worst first, and returns one exit code. `--fail-on` defaults to `high`.
 
+**A check that found nothing says what it looked at.** Zero findings reads as
+clean and can equally mean the check found nothing to examine, so the two are
+printed apart:
+
+```
+These checks ran and found nothing. What each one looked at:
+  celery: tasks found 12, dispatches checked 41
+  aggregates: aggregates seen 0, annotate calls seen 0, files scanned 2025
+```
+
+The first line is a clean zero: there are tasks, they are dispatched, and none
+of them is handed a model instance. The second is a project with nothing for
+that check to read. A check that does not report its own coverage is named as
+such rather than listed as clean, because that zero cannot be read either way.
+The same counters are in `checks_run[name]["examined"]` under `--json`.
+
 **`--strict` exits 2 if a check could not run.** Without it a failed check is
 listed but the others still report, which is usually what you want
 interactively and never what you want in CI: a check that crashed is not a pass.

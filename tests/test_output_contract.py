@@ -128,4 +128,6 @@ def test_no_callback_is_the_default_and_costs_nothing(django_project):
     # Every other caller - the CLI, the report writer, the gate - passes
     # nothing, and has to keep working unchanged.
     report = check_module.run_all(only=["money"])
-    assert report["checks_run"] == {"money": {"ok": True, "findings": report["finding_count"]}}
+    assert set(report["checks_run"]) == {"money"}
+    assert report["checks_run"]["money"]["ok"] is True
+    assert report["checks_run"]["money"]["findings"] == report["finding_count"]
