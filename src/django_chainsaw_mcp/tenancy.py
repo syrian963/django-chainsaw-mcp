@@ -134,6 +134,19 @@ def _ownership_paths(root_label: str, max_depth: int) -> dict[str, dict[str, Any
         root = apps.get_model(root_label)
     except (LookupError, ValueError) as exc:
         known = sorted(m._meta.label for m in apps.get_models())
+        if not known:
+            # readthedocs booted under a settings module that loads almost no
+            # apps, and this raised "Unknown tenant root 'auth.User'. Known
+            # models: " - a sentence that ends in nothing and sends the reader
+            # after the wrong thing. The tenant root was never the problem.
+            raise ValueError(
+                "This project has no models at all. Django booted, so the "
+                "settings module imports, but its INSTALLED_APPS defines "
+                "nothing - usually a base or partial settings module rather "
+                "than the one the site runs on. Point "
+                "DJANGO_CHAINSAW_SETTINGS_MODULE at that one; `project_info` "
+                "lists what did load."
+            ) from exc
         raise ValueError(
             f"Unknown tenant root '{root_label}'. Known models: {', '.join(known[:40])}"
         ) from exc

@@ -16,6 +16,25 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **Three DRF-only checks were marked as needing Django,** so a project
+  without REST Framework got `findings: 0` from them instead of "does not
+  apply". Two of the three returned early without their coverage counters, so
+  the merged report showed a zero with an empty `examined` - the one shape the
+  aggregate had just been fixed to avoid. `n+1-serializer`, `serializers` and
+  `open` now declare `drf` the way others declare FastAPI and SQLAlchemy, and
+  the boot guard was widened with them, since they read the app registry too.
+- **A settings module that loads nothing produced a confident empty report.**
+  readthedocs has a `settings/base.py` that imports cleanly and defines no
+  models; eighteen of twenty-one checks read the model registry, so every one
+  of them reported nothing - correctly, and uselessly. `check` now returns
+  `registry_warning` and prints it before anything else, for a project with no
+  models and for one where only Django's own contrib apps are installed.
+- **`tenancy` on that project raised a sentence that ended in nothing:**
+  `Unknown tenant root 'auth.User'. Known models: `. The tenant root was never
+  the problem. It now says the project has no models and where to look.
+
+### Fixed
+
 - **The aggregate threw away the evidence that makes a zero readable.** Every
   individual check reports what it looked at - `tasks_found`,
   `dispatches_checked`, `files_scanned` - and `run_all` reduced all of it to
@@ -317,6 +336,19 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **`docs/tested-against.md`: eighteen public Django projects, with what they
+  found.** Every figure in this repository used to come from a generated
+  benchmark and one codebase that cannot be shared. Eighteen projects now boot
+  and run - defectdojo at 2001 files, Saleor at 4332, channels at 55 - and the
+  page lists the runs, the twelve defects they exposed in this tool, the two
+  checks that have never fired on real code with the coverage that makes those
+  zeroes readable, and the projects that could not be analysed with the reason
+  for each. `aggregates` examined 174 aggregate calls across twelve projects
+  and found nothing; `open` checked 367 DRF views and found nothing. Neither
+  proves a check is right, and both are now measurements instead of silence.
 
 ### Added
 

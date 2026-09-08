@@ -21,6 +21,7 @@ Start at the row that matches what you are trying to do.
 | [Baselines](baseline.md) | adopting this on a codebase that already has findings |
 | [Configuration](configuration.md) | `pyproject.toml` settings, and suppressions that need a reason |
 | [Performance](performance.md) | what each check costs, and the cache that makes a full run bearable |
+| [Tested against](tested-against.md) | the eighteen public projects this runs on, and the twelve defects they found |
 
 ## The checks, in depth
 

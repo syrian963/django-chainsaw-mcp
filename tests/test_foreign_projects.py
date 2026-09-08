@@ -744,6 +744,157 @@ def test_a_project_with_no_tasks_at_all_says_so(django_project, tmp_path):
     assert report["dispatches_checked"] == 0
 
 
+# --- a project with no DRF in it -------------------------------------------
+
+
+def test_the_drf_checks_declare_that_they_need_drf():
+    """Three checks were marked as needing Django and need DRF.
+
+    healthchecks has no DRF, so `n+1-serializer`, `serializers` and `open`
+    each returned early with `rest_framework_installed: False` - and two of
+    them did it without their coverage counters, so the merged report showed
+    `findings: 0` with an empty `examined`: "this zero cannot be interpreted".
+    It could. There is no DRF there, which is what FastAPI and SQLAlchemy
+    checks already say for themselves.
+    """
+    from django_chainsaw_mcp.check import _REQUIRES
+
+    assert _REQUIRES["n+1-serializer"] == "drf"
+    assert _REQUIRES["serializers"] == "drf"
+    assert _REQUIRES["open"] == "drf"
+
+
+def test_a_project_without_drf_is_told_so_instead_of_reporting_zero():
+    from django_chainsaw_mcp.check import _applicable
+
+    class _Profile:
+        is_django = True
+        is_async_web = False
+
+        def uses(self, name):
+            return name != "drf"
+
+    applies, reason = _applicable("serializers", _Profile())
+    assert applies is False
+    assert "REST Framework" in reason
+
+
+def test_a_project_with_drf_still_runs_them(django_project):
+    # The demo project has DRF, so these have to keep running there - a
+    # requirement that excluded them everywhere would be a silent loss of
+    # three checks.
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(tenant_root="shop.Customer", only=["serializers", "open"])
+    assert set(report["checks_run"]) == {"serializers", "open"}
+    assert report["checks_not_applicable"] == {}
+
+
+def test_the_drf_checks_still_wait_for_the_django_boot(django_project):
+    """They read the app registry, so a failed boot has to disable them too.
+
+    The boot guard tested `_REQUIRES[name] == "django"`, and a third value
+    would have slipped past it - the checks would then run without Django and
+    raise instead of reporting that they could not run.
+    """
+    import django_chainsaw_mcp.check as check_module
+
+    source = Path(check_module.__file__).read_text()
+    assert '_NEEDS_BOOT = {"django", "drf"}' in source
+    assert 'if _REQUIRES.get(name) == "django":' not in source, (
+        "the boot guard still compares against one framework by name"
+    )
+
+
+# --- a settings module that boots and loads nothing -------------------------
+
+
+def test_a_project_with_no_models_is_named_as_such_not_as_a_bad_tenant_root(
+    monkeypatch, django_project
+):
+    """The error ended in nothing and pointed at the wrong thing.
+
+    readthedocs has a `settings/base.py` that imports cleanly and defines no
+    models. `tenancy` raised "Unknown tenant root 'auth.User'. Known models: "
+    - a sentence with an empty list at the end of it - and sent the reader
+    after a tenant root that was never the problem.
+    """
+    from django.apps import apps
+
+    from django_chainsaw_mcp.tenancy import find_unscoped_queries
+
+    monkeypatch.setattr(apps, "get_models", lambda *a, **k: [])
+    real = apps.get_model
+
+    def nothing(label, *args, **kwargs):
+        raise LookupError("no such model")
+
+    monkeypatch.setattr(apps, "get_model", nothing)
+    with pytest.raises(ValueError) as raised:
+        find_unscoped_queries()
+    message = str(raised.value)
+    assert "no models at all" in message
+    assert "INSTALLED_APPS" in message
+    assert "Unknown tenant root" not in message
+    del real
+
+
+def test_the_run_warns_once_when_the_registry_is_empty(monkeypatch, django_project):
+    """Every individual number honest, the run as a whole worthless.
+
+    Eighteen of twenty-one checks read the model registry. On a settings
+    module that loads nothing they all report zero, correctly and uselessly,
+    and nothing in the merged report said the project had not really been
+    loaded.
+    """
+    from django.apps import apps
+
+    from django_chainsaw_mcp.check import _registry_warning
+
+    monkeypatch.setattr(apps, "get_models", lambda *a, **k: [])
+    warning = _registry_warning()
+    assert warning is not None
+    assert "no models" in warning
+
+
+def test_a_project_of_only_contrib_apps_is_also_warned_about(monkeypatch, django_project):
+    from django.apps import apps
+
+    from django_chainsaw_mcp.check import _registry_warning
+
+    class _Config:
+        def __init__(self, label):
+            self.label = label
+
+    monkeypatch.setattr(apps, "get_models", lambda *a, **k: [object()])
+    monkeypatch.setattr(
+        apps, "get_app_configs",
+        lambda: [_Config("auth"), _Config("contenttypes"), _Config("admin")],
+    )
+    warning = _registry_warning()
+    assert warning is not None
+    assert "contrib" in warning
+
+
+def test_a_real_project_is_not_warned_about(django_project):
+    # The demo has its own app, so the warning must stay silent - a banner on
+    # every run would be read as decoration and then ignored on the run that
+    # needed it.
+    from django_chainsaw_mcp.check import _registry_warning
+
+    assert _registry_warning() is None
+
+
+def test_the_warning_reaches_the_merged_report(django_project):
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(tenant_root="shop.Customer", only=["money"])
+    assert "registry_warning" in report, (
+        "a client reading the report has to see this without calling project_info"
+    )
+    assert report["registry_warning"] is None
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 

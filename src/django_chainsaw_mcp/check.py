@@ -446,9 +446,9 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
 _REQUIRES: dict[str, str] = {
     "deploy-safety": "django",
     "tenancy": "django",
-    "n+1-serializer": "django",
+    "n+1-serializer": "drf",
     "n+1-template": "django",
-    "serializers": "django",
+    "serializers": "drf",
     "indexes": "django",
     "datetimes": "django",
     "on-commit": "django",
@@ -460,7 +460,7 @@ _REQUIRES: dict[str, str] = {
     "choices": "django",
     "aggregates": "django",
     "dangling": "django",
-    "open": "django",
+    "open": "drf",
     "migrations": "django",
     "async": "any",
     "routes": "fastapi",
@@ -481,6 +481,16 @@ def _applicable(name: str, profile: Any) -> tuple[bool, str]:
         if profile is None or profile.is_async_web:
             return True, ""
         return False, "no FastAPI or Starlette in this project"
+    if needs == "drf":
+        # All three of these return early with `rest_framework_installed:
+        # False` when DRF is absent, and two of them do it without their
+        # coverage counters - so the merged report showed `findings: 0` with
+        # an empty `examined`, which reads as "this zero cannot be
+        # interpreted". It can: there is no DRF here. Saying so alongside
+        # FastAPI and SQLAlchemy is what the other two frameworks already get.
+        if profile is None or profile.uses("drf"):
+            return True, ""
+        return False, "no Django REST Framework in this project"
     if needs == "sqlalchemy":
         if profile is None or profile.uses("sqlalchemy") or profile.uses("sqlmodel"):
             return True, ""
@@ -512,6 +522,47 @@ _COVERAGE_KEYS = {
     "serializers": ("serializer_count",),
     "sqla": ("models_with_relationships", "relationship_count"),
 }
+
+
+def _registry_warning() -> str | None:
+    """Whether the project that booted is the one the reader thinks it is.
+
+    A settings module can import cleanly and still load nothing: readthedocs
+    has a `settings/base.py` that boots and defines no models, and eighteen of
+    the twenty-one checks then examine an empty registry and report nothing.
+    Every individual number was honest and the run as a whole was worthless,
+    which is the shape of answer this repository exists to avoid.
+    """
+    try:
+        from django.apps import apps
+    except Exception:
+        return None
+    try:
+        models = apps.get_models()
+        labels = [config.label for config in apps.get_app_configs()]
+    except Exception:
+        return None
+
+    if not models:
+        return (
+            "This project has no models. Django booted, so the settings "
+            "module imports, but nothing in INSTALLED_APPS defines a model - "
+            "usually a base or partial settings module rather than the one "
+            "the site runs on. Most checks here read the model registry, so "
+            "their zeroes mean nothing until this is pointed at the real "
+            "settings."
+        )
+    contrib = {"admin", "auth", "contenttypes", "sessions", "messages",
+               "staticfiles", "sites", "humanize", "flatpages", "sitemaps",
+               "redirects", "syndication", "postgres", "gis"}
+    if not [label for label in labels if label not in contrib]:
+        return (
+            "Only Django's own contrib apps are installed. The settings "
+            "module imports, but none of the project's apps are in "
+            "INSTALLED_APPS, so the checks are reading Django rather than "
+            "this project."
+        )
+    return None
 
 
 def _examined(name: str, report: dict[str, Any]) -> dict[str, int]:
@@ -590,12 +641,14 @@ def run_all(
         else:
             not_applicable[name] = reason
 
-    if any(_REQUIRES.get(name) == "django" for name in runnable):
+    # DRF checks need the app registry as much as the plain Django ones.
+    _NEEDS_BOOT = {"django", "drf"}
+    if any(_REQUIRES.get(name) in _NEEDS_BOOT for name in runnable):
         try:
             ensure_django()
         except DjangoBootError as exc:
             for name in list(runnable):
-                if _REQUIRES.get(name) == "django":
+                if _REQUIRES.get(name) in _NEEDS_BOOT:
                     runnable.remove(name)
                     not_applicable[name] = f"Django could not be loaded: {exc}"
 
@@ -629,7 +682,9 @@ def run_all(
         by_severity[finding["severity"]] = by_severity.get(finding["severity"], 0) + 1
 
     failed = [name for name, state in ran.items() if not state["ok"]]
+    warning = _registry_warning()
     return {
+        "registry_warning": warning,
         "frameworks": dict(profile.frameworks) if profile is not None else {},
         "checks_not_applicable": not_applicable,
         "checks_run": ran,

@@ -1329,6 +1329,13 @@ def _cmd_check(args: argparse.Namespace) -> int:
         ran = report["checks_run"]
         ok = [n for n, st in ran.items() if st["ok"]]
         print(f"Ran {len(ok)} check(s): {', '.join(ok)}")
+
+        # Before anything else about the run: was it the right project? A
+        # settings module can import cleanly and load nothing, and then every
+        # number below is honest and the run as a whole is worthless.
+        if report.get("registry_warning"):
+            print()
+            print("WARNING: " + report["registry_warning"])
         if project.source:
             print(f"Settings from {project.source}")
         if report["checks_failed"]:

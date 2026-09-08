@@ -1259,7 +1259,7 @@ def test_every_check_declares_what_it_needs():
     from django_chainsaw_mcp.check import _REQUIRES, ALL_CHECKS
 
     assert set(_REQUIRES) == set(ALL_CHECKS)
-    assert set(_REQUIRES.values()) <= {"django", "fastapi", "sqlalchemy", "any"}
+    assert set(_REQUIRES.values()) <= {"django", "drf", "fastapi", "sqlalchemy", "any"}
 
 
 def _amplification(root=None):
