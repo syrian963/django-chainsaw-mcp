@@ -16,6 +16,31 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **`dangling` read files belonging to other projects in the same
+  repository.** A repository holds more than the project being analysed, and a
+  name only means something against the settings that will load it. Two
+  filters, both using machinery the check already trusts:
+  - **Templates outside every loader directory are not read.** `DIRS` plus the
+    app template directories, from every engine, is the list Django's own
+    loaders walk; a file outside all of them is one this project cannot
+    render. django-tenants ships three tutorials under `examples/` with their
+    own template directories, and reading `{% url %}` out of them asked this
+    resolver about names belonging to another. With no loader directory
+    readable at all, everything is scanned - scanning too much is the better
+    failure.
+  - **A directory with its own `manage.py` is a different project.** Each of
+    those tutorials has one, its own `urlpatterns` and its own app called
+    `customers` that is not the `customers` in `INSTALLED_APPS`. Nested
+    projects are named in the report and their files skipped; the directory
+    holding the configured settings is never nested, however deep it sits.
+
+  With the test-module skip, django-tenants goes from **37 findings to 1** -
+  and that one is right: the library ships an admin override extending
+  `admin/change_form.html`, which those settings genuinely cannot load because
+  `django.contrib.admin` is not installed there.
+
+### Fixed
+
 - **A template that ships inside Django was reported as missing.** Form
   widgets render through the engine `FORM_RENDERER` builds, which carries
   `django/forms/templates` on its own search path and is unreachable from
@@ -226,6 +251,17 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A fourth public project, chosen for the axis the other three missed.**
+  django-tenants is schema-based multi-tenancy: several URLconfs picked per
+  request, several settings modules in one repository. 207 files, 3.7 s, all
+  21 checks green. `docs/performance.md` now has four rows and the scaling is
+  starker than two points suggested - 21x the files for 260x the time, from
+  18 ms per file to 223 ms. Model count is visibly not the driver: Wagtail has
+  twice Saleor's models and a seventh of the time. Still unmeasured causes,
+  still not claimed.
 
 ### Added
 

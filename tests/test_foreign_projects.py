@@ -309,6 +309,120 @@ def test_test_modules_are_skipped_and_the_report_says_how_many(django_project, t
     assert everything["test_files_skipped"] == 0
 
 
+# --- a repository that holds more than one project -------------------------
+
+
+def test_a_template_no_loader_can_reach_is_not_read(django_project, tmp_path):
+    """A repository often carries templates the project cannot render.
+
+    django-tenants ships three tutorials under `examples/`, each with its own
+    settings and its own template directory that is on nobody's search path.
+    Reading `{% url %}` out of those asked this project's resolver about names
+    belonging to a different one - 30 of 37 findings.
+    """
+    from django_chainsaw_mcp.dangling import _is_reachable_template, _template_roots
+
+    roots = _template_roots()
+    assert roots, "the demo project has loader directories to compare against"
+
+    inside = roots[0] / "whatever.html"
+    assert _is_reachable_template(inside, roots)
+    assert not _is_reachable_template(tmp_path / "examples" / "index.html", roots)
+
+
+def test_with_no_readable_loader_directories_everything_is_read(tmp_path):
+    # Scanning too much is the better failure: a project configuring templates
+    # in a way this cannot read must not silently stop being checked.
+    from django_chainsaw_mcp.dangling import _is_reachable_template
+
+    assert _is_reachable_template(tmp_path / "anywhere.html", [])
+
+
+def test_the_demo_projects_own_templates_are_still_read(django_project):
+    # The filter narrows what is scanned, so the case that must not break is
+    # the ordinary one.
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    report = dangling_references()
+    assert report["templates_scanned"] > 0, "the project's own templates stopped being read"
+    assert report["templates_unreachable"] == 0
+    assert report["nested_projects"] == []
+
+
+def test_the_scan_itself_skips_unreachable_templates(django_project, tmp_path):
+    """The wiring, again.
+
+    Reverting the filter left every test above green, because they all called
+    `_is_reachable_template` directly - the same shape of gap that let the
+    tenant-root revert pass earlier in this file. This one drives the check
+    over a directory no loader knows about and reads the counts back.
+    """
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    stray = tmp_path / "examples"
+    stray.mkdir()
+    (stray / "index.html").write_text(
+        "{% extends 'base.html' %}\n{% url 'not_a_real_name_anywhere' %}\n"
+    )
+
+    report = dangling_references(search_path=str(tmp_path))
+    assert report["templates_unreachable"] == 1
+    assert report["templates_scanned"] == 0, "an unreachable template must not be read"
+    assert not [f for f in report["findings"] if f["file"].endswith("index.html")]
+    assert "outside every configured loader directory" in report["note"]
+
+
+def test_a_directory_with_its_own_manage_py_is_a_different_project(django_project, tmp_path):
+    """`manage.py` is the unambiguous marker of a nested project.
+
+    Each django-tenants tutorial has one, its own `urlpatterns`, and an app
+    called `customers` that is not the `customers` in INSTALLED_APPS.
+    """
+    from django_chainsaw_mcp.dangling import _nested_project_dirs
+
+    root = tmp_path
+    (root / "manage.py").write_text("")           # the analysed project's own
+    sample = root / "examples" / "tutorial"
+    sample.mkdir(parents=True)
+    (sample / "manage.py").write_text("")
+    vendored = root / ".venv" / "somepkg"
+    vendored.mkdir(parents=True)
+    (vendored / "manage.py").write_text("")
+
+    nested = _nested_project_dirs(root)
+    assert sample.resolve() in nested
+    assert root.resolve() not in nested, "the root itself is the project, not a nested one"
+    assert not any(".venv" in str(d) for d in nested), "skip dirs are not searched"
+
+
+def test_files_in_a_nested_project_are_skipped_and_counted(django_project, tmp_path):
+    from django_chainsaw_mcp.dangling import dangling_references
+
+    (tmp_path / "views.py").write_text(
+        "from django.urls import reverse\n"
+        "def go():\n"
+        "    return reverse('shop:missing_from_this_project')\n"
+    )
+    sample = tmp_path / "examples" / "tutorial"
+    sample.mkdir(parents=True)
+    (sample / "manage.py").write_text("")
+    (sample / "views.py").write_text(
+        "from django.urls import reverse\n"
+        "def go():\n"
+        "    return reverse('their_own_url_name')\n"
+    )
+
+    report = dangling_references(search_path=str(tmp_path), include_templates=False)
+    names = {f["name"] for f in report["findings"]}
+    assert "shop:missing_from_this_project" in names
+    assert "their_own_url_name" not in names, (
+        "a nested project's URL names belong to its own resolver"
+    )
+    # Two: the nested `views.py`, and the `manage.py` that marked it.
+    assert report["files_in_nested_projects_skipped"] == 2
+    assert "nested Django project" in report["note"]
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 

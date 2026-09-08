@@ -318,6 +318,93 @@ def _sender_strings(node: ast.AST) -> list[tuple[str, int]]:
     return out
 
 
+def _nested_project_dirs(root: Path) -> list[Path]:
+    """Directories under the root that are their own Django project.
+
+    A `manage.py` is the unambiguous marker, and a repository can easily hold
+    several: django-tenants ships three tutorials under `examples/`, each with
+    its own settings, its own `urlpatterns` and its own app called
+    `customers`. Reading `reverse("random_form")` out of one of them asks
+    *this* project's resolver about a name that belongs to a different one,
+    which is the same mistake as reading a test module.
+
+    The directory holding the configured settings is never nested, however
+    deep it sits: that one is the project being analysed.
+    """
+    try:
+        from django.conf import settings
+
+        module = __import__(settings.SETTINGS_MODULE, fromlist=["__file__"])
+        home = Path(module.__file__).resolve().parent
+    except Exception:
+        return []
+
+    nested: list[Path] = []
+    for manage in root.rglob("manage.py"):
+        if any(part in _SKIP_DIRS for part in manage.parts):
+            continue
+        directory = manage.resolve().parent
+        if directory == root.resolve():
+            continue
+        if directory == home or directory in home.parents:
+            continue
+        nested.append(directory)
+    return nested
+
+
+def _template_roots() -> list[Path]:
+    """Every directory the configured loaders actually search.
+
+    `DIRS` plus the app template directories, from each engine, plus the form
+    renderer's own. Django computes this itself - `engine.template_dirs` is
+    the same list the loaders walk - so this is not a guess at where templates
+    live.
+    """
+    roots: list[Path] = []
+
+    def add(engine: Any) -> None:
+        for directory in getattr(engine, "template_dirs", ()) or ():
+            try:
+                roots.append(Path(directory).resolve())
+            except (TypeError, OSError):
+                continue
+
+    try:
+        from django.template import engines
+
+        for engine in engines.all():
+            add(engine)
+            add(getattr(engine, "engine", None))
+    except Exception:
+        pass
+    try:
+        from django.forms.renderers import get_default_renderer
+
+        add(getattr(get_default_renderer(), "engine", None))
+    except Exception:
+        pass
+    return roots
+
+
+def _is_reachable_template(path: Path, roots: list[Path]) -> bool:
+    """Whether this file is one the project could ever render.
+
+    A repository often carries template files no loader can see: a tutorial
+    under `examples/`, a vendored sample, a directory that was never added to
+    `DIRS`. Those files have their own settings and their own URLconf, and
+    reading `{% url %}` out of them asks this project's resolver about names
+    that belong to a different one. On django-tenants that was 30 of 37
+    findings, all from three example projects in the repository.
+
+    With no roots at all - a project configuring templates in a way this
+    cannot read - every file is treated as reachable, because scanning too
+    much is the better failure here.
+    """
+    if not roots:
+        return True
+    return any(root == path or root in path.parents for root in roots)
+
+
 def _template_exists(name: str, cache: dict[str, bool]) -> bool:
     """Whether anything that renders templates here can find this one.
 
@@ -458,8 +545,13 @@ def dangling_references(
         })
 
     tests_skipped = 0
+    nested_skipped = 0
+    nested_projects = _nested_project_dirs(root)
     for path in sorted(root.rglob("*.py")):
         if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        if any(d == path or d in path.parents for d in nested_projects):
+            nested_skipped += 1
             continue
         if not include_tests and _is_test_file(path.relative_to(root)):
             tests_skipped += 1
@@ -567,9 +659,14 @@ def dangling_references(
         )
 
     templates_scanned = 0
+    templates_unreachable = 0
     if include_templates:
+        template_roots = _template_roots()
         for path in sorted(root.rglob("*.html")):
             if any(part in _SKIP_DIRS for part in path.parts):
+                continue
+            if not _is_reachable_template(path.resolve(), template_roots):
+                templates_unreachable += 1
                 continue
             try:
                 source = read_source(path)
@@ -644,7 +741,10 @@ def dangling_references(
         "template_names_checked": checked["template"],
         "files_scanned": files_scanned,
         "test_files_skipped": tests_skipped,
+        "nested_projects": [str(d.relative_to(root.resolve())) for d in nested_projects],
+        "files_in_nested_projects_skipped": nested_skipped,
         "templates_scanned": templates_scanned,
+        "templates_unreachable": templates_unreachable,
         "urlconf_error": url_error,
         "note": (
             "URL names and template names that nothing will resolve. Both are "
@@ -667,6 +767,21 @@ def dangling_references(
                 "may be registered under theirs. Pass include_tests to scan "
                 "them anyway."
                 if tests_skipped else ""
+            )
+            + (
+                f" {templates_unreachable} template file(s) sit outside every "
+                "configured loader directory and were not read: a tutorial "
+                "under examples/, a vendored sample, a directory never added "
+                "to DIRS. Those carry their own settings and their own "
+                "URLconf."
+                if templates_unreachable else ""
+            )
+            + (
+                f" {nested_skipped} file(s) in {len(nested_projects)} nested "
+                "Django project(s) - a directory under this one with its own "
+                "manage.py - were not read, because their names belong to "
+                "their own URLconf and not this one."
+                if nested_skipped else ""
             )
             + (
                 f" The URLconf could not be fully read ({url_error}), so URL "

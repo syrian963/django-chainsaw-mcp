@@ -118,12 +118,14 @@ Three public projects, same command, same machine:
 
 | Project | Files | Models | User CPU | Per file |
 | --- | --- | --- | --- | --- |
+| django-tenants | 207 | 10 | 3.7 s | 18 ms |
 | django-oscar | 828 | 92 | 24 s | 29 ms |
 | Wagtail | 1386 | 264 | 142 s | 102 ms |
 | Saleor | 4332 | 122 | 968 s | 223 ms |
 
-Five times the files costs forty times the time, and the per-file cost climbs
-with every step. This page should not be read as though the cost were linear.
+Twenty-one times the files costs two hundred and sixty times the time, and the
+per-file cost climbs at every step. This page should not be read as though the
+cost were linear.
 
 Model count is clearly not the driver - Wagtail has twice Saleor's models and
 a seventh of the time - so the plausible causes are call-graph depth and

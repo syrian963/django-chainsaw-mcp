@@ -107,6 +107,31 @@ Thirty-five lines would have hidden that. One line says it.
   asked against the wrong URLconf. The report says how many modules were
   skipped, and `--include-tests` reads them anyway.
 
+## What counts as part of this project
+
+A repository holds more than the project being analysed, and a name only means
+something against the settings that will load it.
+
+**Templates no loader can reach are not read.** `DIRS` plus the app template
+directories, from every engine, is the list Django's own loaders walk, and a
+template file outside all of them is one this project cannot render — a
+tutorial under `examples/`, a vendored sample, a directory never added to
+`DIRS`. django-tenants ships three tutorials that way, and reading
+`{% url %}` out of them asked this resolver about names belonging to another.
+If no loader directory can be read at all, everything is scanned: scanning too
+much is the better failure.
+
+**A directory with its own `manage.py` is a different project.** Each of those
+tutorials has one, its own `urlpatterns`, and its own app called `customers`
+that is not the `customers` in `INSTALLED_APPS`. Nested projects are listed in
+the report and their files are skipped; the directory holding the configured
+settings is never treated as nested, however deep it sits.
+
+Together with the test-module skip, this takes django-tenants from 37 findings
+to 1 — and that one is right: the library ships an admin override extending
+`admin/change_form.html`, which those settings genuinely cannot load because
+`django.contrib.admin` is not installed there.
+
 ## Where a template can live
 
 Templates go through `get_template()`, so the project's own loaders decide —
