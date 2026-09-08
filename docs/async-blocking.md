@@ -102,6 +102,36 @@ Exit 1 if anything blocking runs on the loop. `--no-follow` reports only what
 is written directly in an async function; `--max-depth` bounds how far a call
 is followed (3 by default).
 
+
+## A decorator that moves the body to a thread ends the walk
+
+`@sync_to_async` and `@database_sync_to_async` exist to take a synchronous
+body off the event loop, so a call into one of them is awaited and blocks
+nothing. The walk stops there: the function is neither a finding nor a route
+to one.
+
+This is not a corner case. It is the standard answer in the whole channels
+ecosystem, and getting it wrong made the check wrong about the correct way to
+write the code it exists to check. On channels itself, `channels/auth.py` puts
+the decorator on every function that touches the session, and following the
+call graph through it produced **25 findings out of 25** — every one of them
+the idiom rather than the defect. After the fix that project reports nothing,
+which is the right answer for the reference implementation of doing this
+properly.
+
+Both the bare and the called forms are recognised, dotted or not:
+`@database_sync_to_async`, `@sync_to_async(thread_sensitive=True)`,
+`@asgiref.sync.sync_to_async`.
+
+## `settings_dict` is configuration, not a round trip
+
+The ORM receivers are matched anywhere in a call chain, which is what lets
+`session.query(User).all()` be recognised through the call in the middle. It
+also meant `db.connections["default"].settings_dict.get("NAME")` read as a
+database receiver: `db` and `connections` are both in the list, and `get` is a
+terminal. That is a dictionary of settings being read, and channels' own test
+suite does it twice.
+
 ## What it cannot see
 
 - **A blocking call in a third-party library.** Only the project's own

@@ -118,14 +118,22 @@ Three public projects, same command, same machine:
 
 | Project | Files | Models | User CPU | Per file |
 | --- | --- | --- | --- | --- |
+| channels | 55 | 7 | 3.5 s | 64 ms |
 | django-tenants | 207 | 10 | 3.7 s | 18 ms |
 | django-oscar | 828 | 92 | 24 s | 29 ms |
 | Wagtail | 1386 | 264 | 142 s | 102 ms |
 | Saleor | 4332 | 122 | 968 s | 223 ms |
 
-Twenty-one times the files costs two hundred and sixty times the time, and the
-per-file cost climbs at every step. This page should not be read as though the
-cost were linear.
+Read the per-file column from django-oscar down. The two smallest projects are
+mostly Django boot - about two seconds of it, which is over half of channels'
+total - so dividing by 55 files measures the boot, not the analysis. That is
+also why channels looks more expensive per file than a project four times its
+size.
+
+Above a few hundred files the boot stops mattering and the shape is clear:
+five times the files from django-oscar to Saleor costs forty times the time,
+and the per-file cost climbs at every step. This page should not be read as
+though the cost were linear.
 
 Model count is clearly not the driver - Wagtail has twice Saleor's models and
 a seventh of the time - so the plausible causes are call-graph depth and

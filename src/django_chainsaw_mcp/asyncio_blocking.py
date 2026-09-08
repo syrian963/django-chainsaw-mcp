@@ -91,6 +91,13 @@ _ORM_TERMINALS = {
 _ORM_RECEIVERS = ("session", "db", "objects", "query", "cursor", "conn",
                   "connection", "engine", "queryset", "qs", "_default_manager")
 
+# Attributes that turn a connection back into plain data. `_ORM_RECEIVERS`
+# matches anywhere in the chain, so `db.connections["default"].settings_dict`
+# reads as a database receiver even though what follows is a dictionary of
+# configuration. channels' own test suite does exactly that, and
+# `settings_dict.get("NAME")` was reported as a synchronous query.
+_PLAIN_DATA_ATTRS = ("settings_dict",)
+
 _ASYNC_SAFE_PREFIXES = ("await ", "async ")
 
 
@@ -148,6 +155,8 @@ def _classify_call(node: ast.Call) -> tuple[str, str] | None:
     if not chain:
         return None
     if not any(word in chain for word in _ORM_RECEIVERS):
+        return None
+    if any(word in chain for word in _PLAIN_DATA_ATTRS):
         return None
     return ("database", "a synchronous database call blocks the loop for every "
                         "request in this process; use an async driver, or make "
@@ -372,6 +381,29 @@ def _qualname_for(graph: Any, relative: str, node: ast.AST) -> str | None:
     return None
 
 
+# Wrappers that move a synchronous body onto a thread. A call into one of
+# these is awaited and does not hold the loop, so the walk stops there.
+#
+# This is not an edge case in the async world, it is the standard answer to
+# it: channels' own `channels/auth.py` puts `@database_sync_to_async` on every
+# function that touches the session, and the check followed the call graph
+# straight through the decorator and reported all three as blocking. 25 of 25
+# findings on that project were this, which means the check was wrong about
+# the correct way to write the code it exists to check.
+_THREADED_DECORATORS = {"sync_to_async", "database_sync_to_async"}
+
+
+def _runs_on_a_thread(fn: Any) -> bool:
+    """Whether this function's body is handed to a threadpool by a decorator."""
+    for decorator in getattr(fn, "decorators", ()) or ():
+        # `@database_sync_to_async`, `@sync_to_async(thread_sensitive=True)`,
+        # and the dotted forms of both.
+        head = decorator.split("(")[0].strip()
+        if head.split(".")[-1] in _THREADED_DECORATORS:
+            return True
+    return False
+
+
 def _reaches_blocking(
     graph: Any,
     start: str,
@@ -394,6 +426,11 @@ def _reaches_blocking(
             if callee in seen:
                 continue
             seen.add(callee)
+            called = graph.functions.get(callee)
+            if called is not None and _runs_on_a_thread(called):
+                # Awaited, and its body runs off the loop. Neither a finding
+                # nor a route to one.
+                continue
             next_path = [*path, callee]
             if callee in blocking:
                 out.append((callee, next_path))

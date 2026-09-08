@@ -16,6 +16,25 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **`async` was wrong about the standard way to write async Django.**
+  `@sync_to_async` and `@database_sync_to_async` exist to take a synchronous
+  body off the event loop, and the check followed the call graph straight
+  through the decorator into the body it wraps. On channels itself,
+  `channels/auth.py` puts it on every function that touches the session:
+  **25 findings out of 25 were the idiom rather than the defect.** The walk
+  stops at a threaded function now - neither a finding nor a route to one -
+  and both the bare and the called form are recognised, dotted or not. That
+  project now reports nothing, which is the right answer for the reference
+  implementation of doing this properly. The check still reports the identical
+  body with the decorator removed; there is a test holding both side by side.
+- **`db.connections["default"].settings_dict.get("NAME")` was reported as a
+  synchronous query.** ORM receivers are matched anywhere in a chain, which is
+  what lets `session.query(User).all()` be recognised through the call in the
+  middle; it also made a dictionary of settings look like a connection.
+  channels' own tests do it twice.
+
+### Fixed
+
 - **`dangling` read files belonging to other projects in the same
   repository.** A repository holds more than the project being analysed, and a
   name only means something against the settings that will load it. Two
@@ -251,6 +270,18 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A fifth public project, on the one axis nothing had exercised.** Four
+  projects had produced zero `async` findings between them, so the check was
+  effectively untested against real code. channels is ASGI end to end - 55
+  files, 7 models, all 21 checks green - and it found the two defects above
+  immediately. `docs/performance.md` has five rows now, and a correction that
+  came with the fifth: the two smallest projects are mostly Django boot, so
+  their per-file cost measures the boot rather than the analysis, and channels
+  looks dearer per file than a project four times its size. The per-file
+  column means something from a few hundred files up.
 
 ### Added
 

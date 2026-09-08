@@ -423,6 +423,81 @@ def test_files_in_a_nested_project_are_skipped_and_counted(django_project, tmp_p
     assert "nested Django project" in report["note"]
 
 
+# --- the async idiom the check was wrong about -----------------------------
+
+_BODY = """\
+def load_user(scope):
+    session = scope["session"]
+    return session.get("user_id")
+
+
+async def consume(scope):
+    {call}
+"""
+
+_THREADED = (
+    "from channels.db import database_sync_to_async\n\n\n@database_sync_to_async\n"
+    + _BODY.format(call="await load_user(scope)")
+)
+
+_UNWRAPPED = _BODY.format(call="load_user(scope)")
+
+
+def _async_findings(tmp_path, source: str) -> list[dict]:
+    from django_chainsaw_mcp.asyncio_blocking import blocking_in_async
+
+    (tmp_path / "consumers.py").write_text(source)
+    report = blocking_in_async(search_path=str(tmp_path))
+    return list(report["direct"]) + list(report["reached_through_a_call"])
+
+
+def test_a_body_handed_to_a_thread_by_a_decorator_does_not_block(django_project, tmp_path):
+    """`@database_sync_to_async` is the fix, not the defect.
+
+    The check followed the call graph straight through the decorator. On
+    channels itself - the reference implementation of doing this correctly -
+    all 25 findings were this: `channels/auth.py` puts the decorator on every
+    function that touches the session, and each was reported as blocking the
+    loop. A check that is wrong about the correct way to write the code is
+    worse than one that stays quiet.
+    """
+    assert _async_findings(tmp_path, _THREADED) == []
+
+
+def test_the_same_call_without_the_decorator_is_still_reported(django_project, tmp_path):
+    # The fix narrows what is reported, so the case that must not disappear is
+    # the one the check exists for: the identical body, called from async, with
+    # nothing moving it off the loop.
+    findings = _async_findings(tmp_path, _UNWRAPPED)
+    assert findings, "an unwrapped synchronous call from async must still be reported"
+    assert any("load_user" in str(f) for f in findings)
+
+
+def test_reading_a_connections_settings_dict_is_not_a_query(django_project, tmp_path):
+    """`settings_dict` is configuration, not a round trip.
+
+    `_ORM_RECEIVERS` matches anywhere in the chain, so
+    `db.connections["default"].settings_dict.get("NAME")` read as a database
+    receiver - a dictionary lookup reported as a synchronous query. channels'
+    own test suite does exactly that twice.
+    """
+    source = (
+        "from django import db\n"
+        "async def check_db():\n"
+        '    return db.connections["default"].settings_dict.get("NAME")\n'
+    )
+    assert _async_findings(tmp_path, source) == []
+
+
+def test_a_real_query_on_a_connection_is_still_reported(django_project, tmp_path):
+    source = (
+        "from django import db\n"
+        "async def go():\n"
+        '    return db.connections["default"].cursor().execute("select 1")\n'
+    )
+    assert _async_findings(tmp_path, source), "a cursor execute is a real round trip"
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 
