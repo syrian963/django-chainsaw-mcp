@@ -662,6 +662,10 @@ def run_all(
             on_progress(index, total, name)
         fn, build_kwargs, adapt = _CHECKS[name]
         started = time.perf_counter()
+        # Wall clock is what somebody waits for; CPU is what can be compared
+        # between two runs. Recording only the first made a contended machine
+        # look like a 20x regression in one check.
+        started_cpu = time.process_time()
         try:
             report = fn(**build_kwargs(options))
             produced = adapt(report)
@@ -671,12 +675,14 @@ def run_all(
                 "findings": len(produced),
                 "examined": _examined(name, report),
                 "seconds": round(time.perf_counter() - started, 2),
+                "cpu_seconds": round(time.process_time() - started_cpu, 2),
             }
         except Exception as exc:
             ran[name] = {
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
                 "seconds": round(time.perf_counter() - started, 2),
+                "cpu_seconds": round(time.process_time() - started_cpu, 2),
             }
 
     if on_progress is not None:
@@ -709,7 +715,10 @@ def run_all(
             "does not report its own coverage, and that zero cannot be "
             "interpreted either way. Each entry also carries `seconds`: on a "
             "large project a full run is minutes, and the cost is not spread "
-            "evenly, so this is what `--skip` should be aimed at."
+            "evenly, so this is what `--skip` should be aimed at. "
+            "`cpu_seconds` is beside it: wall clock is what you waited, CPU "
+            "is what compares between two runs, and a large gap between the "
+            "totals means the machine was busy and the shares mean nothing."
             + (f" {len(failed)} check(s) failed to run." if failed else "")
         ),
     }

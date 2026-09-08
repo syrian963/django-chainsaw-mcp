@@ -16,6 +16,26 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **`deploy-safety` walked the whole tree once per migration operation.**
+  Measured on DefectDojo, where it was **77% of the entire run**: 356.8 s for
+  158 destructive operations over 2001 files, which is 2.26 s each and exactly
+  the cost of one full walk. The shared parse cache saved re-parsing and could
+  do nothing about re-visiting. The visitor now carries every symbol at once,
+  so 158 walks became one: **356.8 s to 40.4 s**, with all 158 findings
+  identical, and the whole run from 473 s of CPU to 145 s.
+- **The per-check timing added one commit ago measured wall clock,** which is
+  the mistake this page had already documented about `benchmark.sh`. Its own
+  second run read 914 s across the checks for 186 s of CPU and made one check
+  look twenty times slower than it was. `cpu_seconds` is recorded beside
+  `seconds` now - wall is what you waited, CPU is what compares between runs -
+  and the output says so when the totals diverge.
+
+  Building a measurement tool and being fooled by it inside an hour is worth
+  the sentence: a feature that reports numbers has to say when its numbers
+  cannot be compared.
+
+### Fixed
+
 - **Three DRF-only checks were marked as needing Django,** so a project
   without REST Framework got `findings: 0` from them instead of "does not
   apply". Two of the three returned early without their coverage counters, so
@@ -336,6 +356,17 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **An unexplained measurement, written down rather than rounded off.**
+  `n+1-serializer` reads 23 s of CPU against 563 s of wall on DefectDojo,
+  reproducibly, in runs where every other check has wall equal to CPU. It is
+  blocked on something outside the process for around nine minutes. That check
+  imports the target's serializer modules, and an import can open a connection
+  or reach the network, so that is the first place to look - but it has not
+  been diagnosed, and `docs/performance.md` says so. Neither a CPU-only nor a
+  wall-only measurement would have shown it at all.
 
 ### Added
 

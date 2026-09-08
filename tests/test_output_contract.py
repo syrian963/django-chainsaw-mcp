@@ -108,6 +108,10 @@ def test_every_check_records_how_long_it_took(django_project):
         assert "seconds" in state, f"{name} did not record its time"
         assert isinstance(state["seconds"], (int, float)), name
         assert state["seconds"] >= 0, name
+        # Wall clock alone made a busy machine look like a regression, so the
+        # comparable figure travels with it.
+        assert "cpu_seconds" in state, f"{name} recorded no CPU time"
+        assert state["cpu_seconds"] >= 0, name
 
 
 def test_a_check_that_failed_is_still_timed(django_project, monkeypatch):

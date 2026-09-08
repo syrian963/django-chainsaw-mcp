@@ -406,9 +406,12 @@ def test_a_slow_run_says_where_the_time_went(django_project, monkeypatch, capsys
 
     real = run_all(tenant_root="shop.Customer", only=["money"])
     real["checks_run"] = {
-        "races": {"ok": True, "findings": 2, "examined": {}, "seconds": 240.0},
-        "loops": {"ok": True, "findings": 1, "examined": {}, "seconds": 60.0},
-        "money": {"ok": True, "findings": 0, "examined": {}, "seconds": 0.5},
+        "races": {"ok": True, "findings": 2, "examined": {},
+                  "seconds": 240.0, "cpu_seconds": 238.0},
+        "loops": {"ok": True, "findings": 1, "examined": {},
+                  "seconds": 60.0, "cpu_seconds": 59.0},
+        "money": {"ok": True, "findings": 0, "examined": {},
+                  "seconds": 0.5, "cpu_seconds": 0.5},
     }
     real["checks_failed"] = []
     monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)
@@ -417,9 +420,40 @@ def test_a_slow_run_says_where_the_time_went(django_project, monkeypatch, capsys
     printed = capsys.readouterr().out
 
     assert "300s in the checks" in printed, printed[-600:]
+    assert "298s of CPU" in printed, printed[-600:]
     assert "races" in printed
     assert "80%" in printed, "the share is the point, not the seconds"
     assert "--skip takes these names" in printed
+    # Wall and CPU agree here, so there is nothing to warn about.
+    assert "machine was busy" not in printed
+
+
+def test_a_run_on_a_busy_machine_says_the_shares_mean_nothing(
+    django_project, monkeypatch, capsys
+):
+    """The lesson this feature learned about itself.
+
+    A second DefectDojo run read 914 s across the checks for 186 s of CPU -
+    the machine was busy and the numbers were mostly waiting. One check looked
+    like it had gone from 24 s to 570 s. It had not moved.
+    """
+    from django_chainsaw_mcp import cli as cli_module
+    from django_chainsaw_mcp.check import run_all
+
+    real = run_all(tenant_root="shop.Customer", only=["money"])
+    real["checks_run"] = {
+        "races": {"ok": True, "findings": 2, "examined": {},
+                  "seconds": 600.0, "cpu_seconds": 40.0},
+        "loops": {"ok": True, "findings": 1, "examined": {},
+                  "seconds": 300.0, "cpu_seconds": 20.0},
+    }
+    real["checks_failed"] = []
+    monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)
+
+    run("check")
+    printed = capsys.readouterr().out
+    assert "machine was busy" in printed, printed[-600:]
+    assert "Compare the CPU column" in printed
 
 
 def test_a_fast_run_does_not_print_a_timing_table(django_project, monkeypatch, capsys):
@@ -430,7 +464,8 @@ def test_a_fast_run_does_not_print_a_timing_table(django_project, monkeypatch, c
 
     real = run_all(tenant_root="shop.Customer", only=["money"])
     real["checks_run"] = {
-        "money": {"ok": True, "findings": 0, "examined": {}, "seconds": 0.4},
+        "money": {"ok": True, "findings": 0, "examined": {},
+                  "seconds": 0.4, "cpu_seconds": 0.4},
     }
     real["checks_failed"] = []
     monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)

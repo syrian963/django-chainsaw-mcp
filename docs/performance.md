@@ -165,12 +165,52 @@ are one run on your repository, where the parse is shared. They also answer a
 different question - not what a check costs in general, but what it is costing
 here, which is what `--skip` needs.
 
-The distribution is not the same everywhere. On the generated project the
-worst check is 20% of the run. DefectDojo took 22 minutes of CPU for 2001
-files, three times Saleor's cost per file, and **which check spent it has not
-been measured** - that run predates this output. The measurement is one run
-away for whoever needs it, which is the point of adding it rather than
-guessing here.
+The distribution is not the same everywhere, and the first project this was
+pointed at proved it. On the generated project the worst check is 20% of the
+run. On DefectDojo - 2001 files - it was one check and nothing else:
+
+| Check | Before | After | Findings |
+| --- | --- | --- | --- |
+| `deploy-safety` | 356.8 s | **40.4 s** | 158, unchanged |
+| `n+1-serializer` | 24.5 s | 22.9 s | 189, unchanged |
+| `loops` | 14.6 s | 9.9 s | 277, unchanged |
+| everything else | under 14 s each | | |
+
+`deploy-safety` was **77% of the whole run**. It walked the tree once per
+destructive migration operation, and DefectDojo has 158 of them: 2.26 seconds
+each, which is the cost of one full walk. The shared parse cache saved
+re-parsing and could do nothing about re-visiting. One walk carrying every
+symbol replaced 158 walks carrying one, and the whole run went from 473 s of
+CPU to 145 s.
+
+### The wall clock lied, twice
+
+The rerun that produced those numbers first read **914 s across the checks for
+186 s of CPU**, and `n+1-serializer` appeared to have gone from 24 s to 570 s.
+It had not moved; the machine was busy and the rest was waiting. This page had
+already said, about `benchmark.sh`, that one wall-clock run is not a
+measurement - and the timing feature shipped measuring wall clock anyway.
+
+So each check now records `cpu_seconds` beside `seconds`, and the output says
+when the two disagree:
+
+```
+875s in the checks (145s of CPU). The slowest:
+  n+1-serializer        22.9s CPU   16%  (563s waited)
+  deploy-safety         40.4s CPU   28%  (61s waited)
+  The machine was busy: most of the wall time was spent waiting, not
+  working. Compare the CPU column, not the wall column.
+```
+
+**One thing in that output is not contention.** `n+1-serializer` reads 23
+seconds of CPU against 563 seconds of wall, reproducibly, in runs where every
+other check has wall equal to CPU. It is blocked on something outside this
+process for around nine minutes - and since that check imports the target's
+serializer modules, and an import can open a connection or reach the network,
+that is the first place to look. It has not been diagnosed here. It is
+recorded because a number nobody can explain is worth more written down than
+rounded off, and because neither a CPU-only nor a wall-only measurement would
+have shown it at all.
 
 ### Where the half minute goes
 

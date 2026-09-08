@@ -67,36 +67,64 @@ class Reference:
 
 
 class _PythonVisitor(ast.NodeVisitor):
-    """Collect the places a field or model name is actually used."""
+    """Collect the places any of these field or model names is actually used.
 
-    def __init__(self, symbol: str, kind: str) -> None:
-        self.symbol = symbol
-        self.kind = kind
-        self.hits: list[tuple[int, str]] = []
+    One visitor for every symbol in the run, rather than one per symbol.
+    DefectDojo has 158 destructive operations across 2001 files, and walking
+    the tree once per operation cost 356.8 s - 77% of the whole run, and 2.26 s
+    per operation, which is exactly one full walk each. The parse cache saved
+    re-parsing and could do nothing about re-walking.
+
+    `hits` is keyed by symbol. The lookups below are set and dict membership,
+    so the cost of carrying 158 symbols instead of one is the same walk.
+    """
+
+    def __init__(self, symbols: set[str], model_symbols: set[str]) -> None:
+        self.symbols = symbols
+        self.model_symbols = model_symbols
+        # An ORM lookup is a suffix or prefix match, which cannot be a set
+        # membership test - so it is only attempted for strings that contain
+        # the separator at all.
+        self.hits: dict[str, list[tuple[int, str]]] = {}
+
+    def _record(self, symbol: str, lineno: int, label: str) -> None:
+        self.hits.setdefault(symbol, []).append((lineno, label))
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr == self.symbol:
-            self.hits.append((node.lineno, "attribute access"))
+        if node.attr in self.symbols:
+            self._record(node.attr, node.lineno, "attribute access")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if self.kind == "model" and node.id == self.symbol:
-            self.hits.append((node.lineno, "model reference"))
+        if node.id in self.model_symbols:
+            self._record(node.id, node.lineno, "model reference")
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:
         # Docstrings are Constants too, but only an exact match counts, so a
         # sentence mentioning the field cannot register.
-        if isinstance(node.value, str):
-            if node.value == self.symbol:
-                self.hits.append((node.lineno, "string field name"))
-            elif node.value.startswith(f"{self.symbol}__") or node.value.endswith(f"__{self.symbol}"):
-                self.hits.append((node.lineno, "orm lookup in string"))
+        value = node.value
+        if isinstance(value, str):
+            if value in self.symbols:
+                self._record(value, node.lineno, "string field name")
+            elif "__" in value:
+                head, _, tail = value.partition("__")
+                if head in self.symbols:
+                    self._record(head, node.lineno, "orm lookup in string")
+                last = value.rpartition("__")[2]
+                if last in self.symbols and last != head:
+                    self._record(last, node.lineno, "orm lookup in string")
+                del tail
         self.generic_visit(node)
 
     def visit_keyword(self, node: ast.keyword) -> None:
-        if node.arg and (node.arg == self.symbol or node.arg.startswith(f"{self.symbol}__")):
-            self.hits.append((node.value.lineno, "keyword argument"))
+        if node.arg:
+            if node.arg in self.symbols:
+                self._record(node.arg, node.value.lineno, "keyword argument")
+            elif "__" in node.arg:
+                head = node.arg.partition("__")[0]
+                if head in self.symbols:
+                    self._record(head, node.value.lineno, "keyword argument")
         self.generic_visit(node)
 
 
@@ -114,27 +142,33 @@ def _iter_files(root: Path) -> Iterable[Path]:
         yield path
 
 
-def _scan_python(path: Path, root: Path, symbol: str, kind: str) -> list[Reference]:
+def _scan_python(
+    path: Path, root: Path, symbols: set[str], model_symbols: set[str]
+) -> dict[str, list[Reference]]:
     try:
         source = read_source(path)
         tree = parse_file(path)
     except (OSError, SyntaxError):
-        return []
+        return {}
 
-    visitor = _PythonVisitor(symbol, kind)
+    visitor = _PythonVisitor(symbols, model_symbols)
     visitor.visit(tree)
     if not visitor.hits:
-        return []
+        return {}
 
     lines = source.splitlines()
-    seen: set[int] = set()
-    out: list[Reference] = []
-    for lineno, label in visitor.hits:
-        if lineno in seen:
-            continue
-        seen.add(lineno)
-        text = lines[lineno - 1].strip() if 0 < lineno <= len(lines) else ""
-        out.append(Reference(str(path.relative_to(root)), lineno, text[:160], label))
+    relative = str(path.relative_to(root))
+    out: dict[str, list[Reference]] = {}
+    for symbol, hits in visitor.hits.items():
+        seen: set[int] = set()
+        found: list[Reference] = []
+        for lineno, label in hits:
+            if lineno in seen:
+                continue
+            seen.add(lineno)
+            text = lines[lineno - 1].strip() if 0 < lineno <= len(lines) else ""
+            found.append(Reference(relative, lineno, text[:160], label))
+        out[symbol] = found
     return out
 
 
@@ -154,16 +188,42 @@ def _scan_template(path: Path, root: Path, symbol: str) -> list[Reference]:
     return out
 
 
-def _scan(root: Path, symbol: str, kind: str, max_hits: int) -> list[Reference]:
-    found: list[Reference] = []
+def _scan_all(
+    root: Path, symbols: set[str], model_symbols: set[str], max_hits: int
+) -> dict[str, list[Reference]]:
+    """Every reference to every symbol, in one walk of the tree.
+
+    This used to be one walk per symbol. On DefectDojo - 158 destructive
+    operations over 2001 files - that was 356.8 s, 77% of the whole run and
+    2.26 s per operation, which is the cost of a full walk each. The shared
+    parse cache saved re-parsing and could do nothing about re-visiting.
+
+    Results are keyed by symbol name rather than by operation, so two
+    migrations dropping a field of the same name share the answer. They would
+    have found the same lines separately: this check matches on the name, and
+    always did.
+    """
+    found: dict[str, list[Reference]] = {symbol: [] for symbol in symbols}
+    full: set[str] = set()
+
     for path in _iter_files(root):
-        found.extend(
-            _scan_python(path, root, symbol, kind)
-            if path.suffix == _PY_SUFFIX
-            else _scan_template(path, root, symbol)
-        )
-        if len(found) >= max_hits:
-            return found[:max_hits]
+        if len(full) == len(symbols):
+            break
+        wanted = symbols - full
+        if path.suffix == _PY_SUFFIX:
+            hits = _scan_python(path, root, wanted, model_symbols & wanted)
+        else:
+            hits = {
+                symbol: refs
+                for symbol in wanted
+                if (refs := _scan_template(path, root, symbol))
+            }
+        for symbol, refs in hits.items():
+            bucket = found[symbol]
+            bucket.extend(refs)
+            if len(bucket) >= max_hits:
+                del bucket[max_hits:]
+                full.add(symbol)
     return found
 
 
@@ -290,6 +350,10 @@ def deploy_safety(
     skipped_apps: set[str] = set()
     checked = 0
 
+    # Collect first, scan once. Every symbol the run cares about has to be
+    # known before the tree is walked, or the walk happens again per symbol -
+    # which is what made this check 77% of a run on DefectDojo.
+    pending: list[tuple[tuple[str, str], Any, str, str]] = []
     for key, migration in sorted(loader.disk_migrations.items()):
         app_label = key[0]
         if key in applied:
@@ -298,7 +362,6 @@ def deploy_safety(
             if any(_DESTRUCTIVE.get(type(op).__name__) for op in migration.operations):
                 skipped_apps.add(app_label)
             continue
-
         for operation in migration.operations:
             kind = _DESTRUCTIVE.get(type(operation).__name__)
             if kind is None:
@@ -306,46 +369,56 @@ def deploy_safety(
             symbol = _symbol_for(operation, kind)
             if not symbol:
                 continue
+            pending.append((key, operation, kind, symbol))
 
-            checked += 1
-            references = _scan(root, symbol, kind, max_hits_per_symbol)
-            entry: dict[str, Any] = {
-                "app": app_label,
-                "migration": key[1],
-                "operation": type(operation).__name__,
-                "symbol": symbol,
-                "symbol_kind": kind,
-                "model": getattr(operation, "model_name", None),
-                "reference_count": len(references),
-                "references": [r.__dict__ for r in references],
-            }
-            if symbol.lower() in _GENERIC:
-                entry["confidence"] = "low"
-                entry["confidence_reason"] = (
-                    f"'{symbol}' is a common name; matches may belong to other models."
-                )
-            else:
-                entry["confidence"] = "high"
+    all_symbols = {symbol for _, _, _, symbol in pending}
+    model_symbols = {symbol for _, _, kind, symbol in pending if kind == "model"}
+    references_by_symbol = (
+        _scan_all(root, all_symbols, model_symbols, max_hits_per_symbol)
+        if all_symbols else {}
+    )
 
-            if references:
-                entry["verdict"] = "blocking"
-                entry["explanation"] = (
-                    f"{entry['operation']} drops '{symbol}', but {len(references)} "
-                    "place(s) still refer to it. During a rolling deploy the old "
-                    "pods keep running against the new schema and will fail."
-                )
-                entry["safer"] = (
-                    "Ship a release that stops using it, deploy that everywhere, "
-                    "then ship this migration."
-                )
-                blocking.append(entry)
-            else:
-                entry["verdict"] = "clear"
-                entry["explanation"] = (
-                    f"{entry['operation']} drops '{symbol}' and no remaining "
-                    "reference was found outside migrations. The code has caught up."
-                )
-                clear.append(entry)
+    for key, operation, kind, symbol in pending:
+        app_label = key[0]
+        checked += 1
+        references = references_by_symbol.get(symbol, [])
+        entry: dict[str, Any] = {
+            "app": app_label,
+            "migration": key[1],
+            "operation": type(operation).__name__,
+            "symbol": symbol,
+            "symbol_kind": kind,
+            "model": getattr(operation, "model_name", None),
+            "reference_count": len(references),
+            "references": [r.__dict__ for r in references],
+        }
+        if symbol.lower() in _GENERIC:
+            entry["confidence"] = "low"
+            entry["confidence_reason"] = (
+                f"'{symbol}' is a common name; matches may belong to other models."
+            )
+        else:
+            entry["confidence"] = "high"
+
+        if references:
+            entry["verdict"] = "blocking"
+            entry["explanation"] = (
+                f"{entry['operation']} drops '{symbol}', but {len(references)} "
+                "place(s) still refer to it. During a rolling deploy the old "
+                "pods keep running against the new schema and will fail."
+            )
+            entry["safer"] = (
+                "Ship a release that stops using it, deploy that everywhere, "
+                "then ship this migration."
+            )
+            blocking.append(entry)
+        else:
+            entry["verdict"] = "clear"
+            entry["explanation"] = (
+                f"{entry['operation']} drops '{symbol}' and no remaining "
+                "reference was found outside migrations. The code has caught up."
+            )
+            clear.append(entry)
 
     raw_sql = _raw_sql_sites(root)
 

@@ -1355,17 +1355,27 @@ def _cmd_check(args: argparse.Namespace) -> int:
         # figures in `benchmark.sh` are separate processes on a generated
         # project, which is a different measurement.
         timed = sorted(
-            ((state.get("seconds") or 0.0, name) for name, state in ran.items()),
+            (
+                (state.get("cpu_seconds") or 0.0, state.get("seconds") or 0.0, name)
+                for name, state in ran.items()
+            ),
             reverse=True,
         )
-        total = sum(seconds for seconds, _ in timed)
-        if total >= 10 and timed:
+        total_cpu = sum(cpu for cpu, _, _ in timed)
+        total_wall = sum(wall for _, wall, _ in timed)
+        if total_wall >= 10 and timed:
             print()
-            print(f"{total:.0f}s in the checks. The slowest:")
-            for seconds, name in timed[:5]:
-                share = (seconds / total * 100) if total else 0
-                print(f"  {name:18} {seconds:7.1f}s  {share:4.0f}%")
+            print(f"{total_wall:.0f}s in the checks ({total_cpu:.0f}s of CPU). "
+                  "The slowest:")
+            for cpu, wall, name in timed[:5]:
+                share = (cpu / total_cpu * 100) if total_cpu else 0
+                print(f"  {name:18} {cpu:7.1f}s CPU  {share:4.0f}%  ({wall:.0f}s waited)")
             print("  (--skip takes these names)")
+            # The lesson this feature learned about itself on its second run.
+            if total_cpu and total_wall > total_cpu * 1.5:
+                print("  The machine was busy: most of the wall time was spent "
+                      "waiting, not working. Compare the CPU column, not the "
+                      "wall column, and not against a run on a quiet machine.")
 
         clean = [
             (name, state.get("examined") or {})
