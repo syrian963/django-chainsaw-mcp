@@ -16,6 +16,17 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **"You did not set the variable" sent people after a file nobody wrote.**
+  A library often has no settings module at all: django-rest-framework
+  configures Django in `tests/conftest.py` with `settings.configure(...)`,
+  which is the normal way to boot the framework for a library's own test run.
+  When that pattern is present the error now says so, and says what to do
+  instead - point at an application that uses the library. Only the handful of
+  files where it is conventionally written are read, because this runs on a
+  failure path and must not turn a missing variable into a scan of the tree.
+
+### Fixed
+
 - **`async` was wrong about the standard way to write async Django.**
   `@sync_to_async` and `@database_sync_to_async` exist to take a synchronous
   body off the event loop, and the check followed the call graph straight

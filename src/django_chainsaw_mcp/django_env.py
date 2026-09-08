@@ -26,6 +26,35 @@ class DjangoBootError(RuntimeError):
     """Raised when the target project cannot be loaded."""
 
 
+def _configures_settings_in_code(root: Path) -> str | None:
+    """The file where this project configures Django without a settings module.
+
+    `settings.configure(...)` in a conftest is how a library boots Django for
+    its own tests - django-rest-framework does it, and so there is nothing to
+    put in DJANGO_CHAINSAW_SETTINGS_MODULE. Saying "you did not set the
+    variable" sends somebody looking for a file that was never written, so
+    when the pattern is there the error says so instead.
+
+    Only the few places it is conventionally written are read, and only the
+    first hit matters: this runs on a failure path and must not turn a missing
+    variable into a scan of the whole tree.
+    """
+    candidates = [
+        root / "conftest.py",
+        root / "tests" / "conftest.py",
+        root / "setup.py",
+        root / "runtests.py",
+        root / "tests" / "runtests.py",
+    ]
+    for path in candidates:
+        try:
+            if "settings.configure(" in path.read_text(encoding="utf-8", errors="ignore"):
+                return str(path.relative_to(root))
+        except OSError:
+            continue
+    return None
+
+
 @dataclass(frozen=True)
 class BootConfig:
     project_path: Path
@@ -42,12 +71,25 @@ class BootConfig:
             if not value
         ]
         if missing:
+            hint = ""
+            if SETTINGS_MODULE_VAR in missing and raw_path:
+                where = _configures_settings_in_code(Path(raw_path).expanduser())
+                if where:
+                    hint = (
+                        f" This project has no settings module to point at: "
+                        f"{where} calls settings.configure() instead, which is "
+                        "how a library configures Django for its own test run. "
+                        "Point this at an application that uses the library, "
+                        "or at a settings module of your own that imports the "
+                        "same apps."
+                    )
             raise DjangoBootError(
                 "Missing environment variable(s): "
                 + ", ".join(missing)
                 + ". Set them in the MCP client config, for example "
                 f'"{PROJECT_PATH_VAR}": "/path/to/project", '
                 f'"{SETTINGS_MODULE_VAR}": "myproject.settings".'
+                + hint
             )
 
         project_path = Path(raw_path).expanduser().resolve()

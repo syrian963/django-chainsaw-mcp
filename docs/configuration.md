@@ -76,6 +76,22 @@ made in a hurry, and in a year it is indistinguishable from a bug nobody
 noticed. The reason is the only part still worth reading by then, and requiring
 it costs eight words.
 
+
+## A library is not a project
+
+This needs an importable settings module, and a library often has none.
+django-rest-framework configures Django in `tests/conftest.py` with
+`settings.configure(...)`, which is the normal way to boot the framework for a
+library's own test run — so there is nothing to put in
+`DJANGO_CHAINSAW_SETTINGS_MODULE`, and the error says that rather than telling
+you to set a variable that has no value for this repository.
+
+The checks that need no Django still run: framework detection, and the
+`async` walk. The other twenty report that they could not, with the reason.
+
+To analyse a library's effect on real code, point this at an application that
+uses it.
+
 ## Which mechanism for which situation
 
 | | |

@@ -498,6 +498,68 @@ def test_a_real_query_on_a_connection_is_still_reported(django_project, tmp_path
     assert _async_findings(tmp_path, source), "a cursor execute is a real round trip"
 
 
+# --- a project that has no settings module at all --------------------------
+
+
+def _boot_error(monkeypatch, root: Path) -> str:
+    from django_chainsaw_mcp.django_env import (
+        PROJECT_PATH_VAR,
+        SETTINGS_MODULE_VAR,
+        BootConfig,
+        DjangoBootError,
+    )
+
+    monkeypatch.setenv(PROJECT_PATH_VAR, str(root))
+    monkeypatch.delenv(SETTINGS_MODULE_VAR, raising=False)
+    try:
+        BootConfig.from_env()
+    except DjangoBootError as exc:
+        return str(exc)
+    raise AssertionError("expected a boot error")
+
+
+def test_a_library_that_configures_settings_in_code_is_named_as_such(monkeypatch, tmp_path):
+    """"You did not set the variable" sends people after a file nobody wrote.
+
+    django-rest-framework configures Django in `tests/conftest.py` with
+    `settings.configure(...)`, which is how a library boots itself for its own
+    test run. There is no settings module, so the generic message is a wild
+    goose chase.
+    """
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "conftest.py").write_text(
+        "from django.conf import settings\n"
+        "def pytest_configure():\n"
+        "    settings.configure(INSTALLED_APPS=[])\n"
+    )
+
+    message = _boot_error(monkeypatch, tmp_path)
+    assert "no settings module to point at" in message
+    assert "tests/conftest.py" in message
+    assert "settings.configure()" in message
+
+
+def test_an_ordinary_project_gets_the_ordinary_message(monkeypatch, tmp_path):
+    # The hint must not appear for a project that simply has the variable
+    # unset, which is the common case and a different problem.
+    (tmp_path / "myproject").mkdir()
+    (tmp_path / "myproject" / "settings.py").write_text("DEBUG = True\n")
+
+    message = _boot_error(monkeypatch, tmp_path)
+    assert "Missing environment variable" in message
+    assert "no settings module to point at" not in message
+
+
+def test_the_hint_does_not_walk_the_whole_tree(monkeypatch, tmp_path):
+    # This runs on a failure path. A `settings.configure()` buried somewhere
+    # unconventional is not worth scanning a large project to find.
+    deep = tmp_path / "a" / "b" / "c"
+    deep.mkdir(parents=True)
+    (deep / "conftest.py").write_text("settings.configure()\n")
+
+    assert "no settings module to point at" not in _boot_error(monkeypatch, tmp_path)
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 
