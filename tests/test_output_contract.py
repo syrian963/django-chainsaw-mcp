@@ -90,6 +90,61 @@ def test_a_check_that_starts_reporting_more_is_not_a_protocol_error():
     assert parsed.model_extra == {"rows_scanned": 234_624}
 
 
+# --- where the time went ----------------------------------------------------
+
+
+def test_every_check_records_how_long_it_took(django_project):
+    """A full run on a 2001-file project is 22 minutes of CPU.
+
+    Nothing in the output said which check spent it, so there was no way to
+    decide what to `--skip`. `benchmark.sh` times each check, but as a
+    separate process on a generated project - a different measurement, and
+    one that says nothing about the repository in front of you.
+    """
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(tenant_root="shop.Customer")
+    for name, state in report["checks_run"].items():
+        assert "seconds" in state, f"{name} did not record its time"
+        assert isinstance(state["seconds"], (int, float)), name
+        assert state["seconds"] >= 0, name
+
+
+def test_a_check_that_failed_is_still_timed(django_project, monkeypatch):
+    # A check that spent four minutes and then raised is the most useful one
+    # to know the cost of, and the timing sat inside the success branch.
+    from django_chainsaw_mcp import check as check_module
+
+    original = check_module._CHECKS["money"]
+
+    def explode(**kwargs):
+        raise RuntimeError("no")
+
+    monkeypatch.setitem(
+        check_module._CHECKS, "money", (explode, original[1], original[2])
+    )
+    report = check_module.run_all(only=["money"])
+    state = report["checks_run"]["money"]
+    assert state["ok"] is False
+    assert "seconds" in state, "a check that raised was not timed"
+
+
+def test_the_recorded_times_add_up_to_the_run(django_project):
+    import time
+
+    from django_chainsaw_mcp.check import run_all
+
+    started = time.perf_counter()
+    report = run_all(tenant_root="shop.Customer")
+    wall = time.perf_counter() - started
+
+    recorded = sum(state["seconds"] for state in report["checks_run"].values())
+    assert recorded <= wall + 0.5, "the parts cannot exceed the whole"
+    # Boot, framework detection and the merge sit outside the per-check
+    # timings, so the sum is a floor rather than the total.
+    assert recorded > 0
+
+
 # --- the progress callback --------------------------------------------------
 
 

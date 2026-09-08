@@ -339,6 +339,24 @@ every change so far belongs to this release.
 
 ### Added
 
+- **A full run says where its time went.** DefectDojo cost 22 minutes of CPU
+  for 2001 files - three times Saleor's cost per file - and nothing in the
+  output named the check that spent it, so there was no way to decide what to
+  `--skip`. Each entry in `checks_run` now carries `seconds`, including for a
+  check that raised, and the CLI prints the worst five with their share once
+  the total passes ten seconds. Below that it prints nothing: a block on every
+  run is decoration, and decoration is skipped on the run that needed reading.
+
+  `benchmark.sh` already timed each check, but as a separate process on a
+  generated project - each paying its own Django boot and its own parse. This
+  is one run on the repository in front of you, which is the number `--skip`
+  needs. On the generated project the worst check is 20% of the run; whether
+  that holds on a real one is now measurable rather than assumable, and
+  `docs/performance.md` says plainly that DefectDojo's 22 minutes have not yet
+  been broken down.
+
+### Added
+
 - **`docs/tested-against.md`: eighteen public Django projects, with what they
   found.** Every figure in this repository used to come from a generated
   benchmark and one codebase that cannot be shared. Eighteen projects now boot

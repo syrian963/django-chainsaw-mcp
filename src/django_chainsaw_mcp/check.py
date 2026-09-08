@@ -18,6 +18,7 @@ finding.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -660,6 +661,7 @@ def run_all(
         if on_progress is not None:
             on_progress(index, total, name)
         fn, build_kwargs, adapt = _CHECKS[name]
+        started = time.perf_counter()
         try:
             report = fn(**build_kwargs(options))
             produced = adapt(report)
@@ -668,9 +670,14 @@ def run_all(
                 "ok": True,
                 "findings": len(produced),
                 "examined": _examined(name, report),
+                "seconds": round(time.perf_counter() - started, 2),
             }
         except Exception as exc:
-            ran[name] = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            ran[name] = {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "seconds": round(time.perf_counter() - started, 2),
+            }
 
     if on_progress is not None:
         on_progress(total, total, "")
@@ -700,7 +707,9 @@ def run_all(
             "carries `examined`: what it looked at, so a zero can be read as "
             "clean rather than blind. An empty `examined` means the check "
             "does not report its own coverage, and that zero cannot be "
-            "interpreted either way."
+            "interpreted either way. Each entry also carries `seconds`: on a "
+            "large project a full run is minutes, and the cost is not spread "
+            "evenly, so this is what `--skip` should be aimed at."
             + (f" {len(failed)} check(s) failed to run." if failed else "")
         ),
     }

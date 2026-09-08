@@ -145,6 +145,33 @@ is stated as the reason - and with six projects the table is now good enough
 to say plainly that a projection from file count alone will be wrong. Budget
 from a project of comparable shape, or measure yours.
 
+### Which check to skip, on the project in front of you
+
+A full run records how long each check took, and prints the worst five once
+the total passes ten seconds:
+
+```
+301s in the checks. The slowest:
+  races                  240.0s    80%
+  loops                   60.0s    20%
+  (--skip takes these names)
+```
+
+The same figures are in `checks_run[name]["seconds"]` under `--json`.
+
+This is not the table below. Those numbers are separate processes on a
+generated project, each paying its own Django boot and its own parse; these
+are one run on your repository, where the parse is shared. They also answer a
+different question - not what a check costs in general, but what it is costing
+here, which is what `--skip` needs.
+
+The distribution is not the same everywhere. On the generated project the
+worst check is 20% of the run. DefectDojo took 22 minutes of CPU for 2001
+files, three times Saleor's cost per file, and **which check spent it has not
+been measured** - that run predates this output. The measurement is one run
+away for whoever needs it, which is the point of adding it rather than
+guessing here.
+
 ### Where the half minute goes
 
 Each check on its own, on the same project. Every one of these includes about

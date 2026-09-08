@@ -1349,6 +1349,24 @@ def _cmd_check(args: argparse.Namespace) -> int:
         # at - on a 2025-file project with Celery in it, `celery` reported 0
         # because all 41 dispatches pass identifiers, which is a different
         # sentence from "there are no tasks here".
+        # Where the time went. On a 2001-file project a full run is 22
+        # minutes of CPU and the cost is nowhere near even - without this
+        # there is no way to know which check to leave out, and the per-check
+        # figures in `benchmark.sh` are separate processes on a generated
+        # project, which is a different measurement.
+        timed = sorted(
+            ((state.get("seconds") or 0.0, name) for name, state in ran.items()),
+            reverse=True,
+        )
+        total = sum(seconds for seconds, _ in timed)
+        if total >= 10 and timed:
+            print()
+            print(f"{total:.0f}s in the checks. The slowest:")
+            for seconds, name in timed[:5]:
+                share = (seconds / total * 100) if total else 0
+                print(f"  {name:18} {seconds:7.1f}s  {share:4.0f}%")
+            print("  (--skip takes these names)")
+
         clean = [
             (name, state.get("examined") or {})
             for name, state in sorted(ran.items())

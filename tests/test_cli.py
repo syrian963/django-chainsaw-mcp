@@ -397,3 +397,43 @@ def test_a_clean_check_prints_what_it_looked_at(django_project, monkeypatch, cap
     assert "money: does not report its coverage" in printed, printed
     # A check that found something belongs in the findings, not in this block.
     assert "loops:" not in printed.split("ran and found nothing")[1]
+
+
+def test_a_slow_run_says_where_the_time_went(django_project, monkeypatch, capsys):
+    """Only printed above ten seconds, which the demo project never reaches."""
+    from django_chainsaw_mcp import cli as cli_module
+    from django_chainsaw_mcp.check import run_all
+
+    real = run_all(tenant_root="shop.Customer", only=["money"])
+    real["checks_run"] = {
+        "races": {"ok": True, "findings": 2, "examined": {}, "seconds": 240.0},
+        "loops": {"ok": True, "findings": 1, "examined": {}, "seconds": 60.0},
+        "money": {"ok": True, "findings": 0, "examined": {}, "seconds": 0.5},
+    }
+    real["checks_failed"] = []
+    monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)
+
+    run("check")
+    printed = capsys.readouterr().out
+
+    assert "300s in the checks" in printed, printed[-600:]
+    assert "races" in printed
+    assert "80%" in printed, "the share is the point, not the seconds"
+    assert "--skip takes these names" in printed
+
+
+def test_a_fast_run_does_not_print_a_timing_table(django_project, monkeypatch, capsys):
+    # A block on every run is decoration, and decoration gets skipped on the
+    # run that needed reading.
+    from django_chainsaw_mcp import cli as cli_module
+    from django_chainsaw_mcp.check import run_all
+
+    real = run_all(tenant_root="shop.Customer", only=["money"])
+    real["checks_run"] = {
+        "money": {"ok": True, "findings": 0, "examined": {}, "seconds": 0.4},
+    }
+    real["checks_failed"] = []
+    monkeypatch.setattr(cli_module, "run_all", lambda **kwargs: real)
+
+    run("check")
+    assert "in the checks. The slowest" not in capsys.readouterr().out
