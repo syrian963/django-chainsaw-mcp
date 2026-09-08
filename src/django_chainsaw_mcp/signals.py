@@ -63,13 +63,30 @@ def _conditional_lines(tree: ast.AST) -> set[int]:
     out: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.If, ast.IfExp)):
-            body = list(getattr(node, "body", []) or [])
-            body += list(getattr(node, "orelse", []) or [])
-            for child in body:
-                for inner in ast.walk(child) if isinstance(child, ast.AST) else []:
-                    if hasattr(inner, "lineno"):
-                        out.add(inner.lineno)
+            for branch in (_branch(node, "body"), _branch(node, "orelse")):
+                for child in branch:
+                    for inner in ast.walk(child):
+                        if hasattr(inner, "lineno"):
+                            out.add(inner.lineno)
     return out
+
+
+def _branch(node: ast.AST, name: str) -> list[ast.AST]:
+    """One branch of a conditional, always as a list of nodes.
+
+    `ast.If.body` is a list of statements and `ast.IfExp.body` is a single
+    expression, and the two were read the same way. A ternary in a signal
+    receiver - `x = a if cond else b` - therefore raised
+    `TypeError: 'Constant' object is not iterable`, which took down the whole
+    check rather than one receiver. Found on Saleor; Wagtail has no ternary in
+    a receiver and never showed it.
+    """
+    value = getattr(node, name, None)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, ast.AST)]
+    return [value] if isinstance(value, ast.AST) else []
 
 
 class _ReceiverBody(ast.NodeVisitor):

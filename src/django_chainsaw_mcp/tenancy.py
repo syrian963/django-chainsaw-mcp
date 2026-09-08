@@ -58,7 +58,68 @@ _SKIP_DIRS = {
 }
 
 # Files where an unscoped queryset is usually legitimate.
-_EXEMPT_NAMES = {"admin.py", "management", "commands", "tests.py", "conftest.py", "factories.py"}
+#
+# `tests.py` is the layout `startproject` gives you. Every project past a
+# certain size moves to a `tests/` package with `test_*.py` inside it, and
+# only the first was listed here - so the docstring's promise that tests are
+# skipped was true for small projects and false for large ones. On Saleor that
+# was around 350 findings out of 1992, all from code the check does not mean
+# to read.
+_EXEMPT_NAMES = {
+    "admin.py", "management", "commands", "tests", "tests.py", "testing",
+    "conftest.py", "factories.py", "fixtures.py",
+}
+
+
+def _is_test_module(name: str) -> bool:
+    """A test file under either of the two naming conventions."""
+    return name.startswith("test_") or name.endswith("_test.py")
+
+
+DEFAULT_TENANT_ROOT = "auth.User"
+
+
+def resolve_tenant_root(label: str) -> tuple[str, str | None]:
+    """The model that owns data, with the default resolved to the real one.
+
+    `auth.User` is the default because it is right for a project that did not
+    replace the user model. A project that did replace it - and every project
+    with a custom user does - has no `auth.User` at all, so the default was not
+    a weaker answer, it was no answer: the check refused to run and named forty
+    models it could have meant. On Saleor, whose user is `account.User`, that
+    is exactly what happened.
+
+    So when the caller asked for the default and the default is absent, this
+    reads `AUTH_USER_MODEL`, which is where Django keeps the answer. Only for
+    the default: a label somebody typed is never quietly replaced with a
+    different model, because a report about the wrong root is worse than an
+    error. The substitution is returned as a note and travels with the report,
+    so nobody has to infer which model was analysed.
+    """
+    from django.apps import apps
+    from django.conf import settings
+
+    if label != DEFAULT_TENANT_ROOT:
+        return label, None
+    try:
+        apps.get_model(label)
+    except (LookupError, ValueError):
+        pass
+    else:
+        return label, None
+
+    configured = getattr(settings, "AUTH_USER_MODEL", None)
+    if not configured or configured == DEFAULT_TENANT_ROOT:
+        return label, None
+    try:
+        apps.get_model(configured)
+    except (LookupError, ValueError):
+        return label, None
+    return configured, (
+        f"No auth.User in this project, so the default tenant root was taken "
+        f"from AUTH_USER_MODEL: {configured}. Pass tenant_root explicitly to "
+        f"analyse ownership from a different model."
+    )
 
 
 def _ownership_paths(root_label: str, max_depth: int) -> dict[str, dict[str, Any]]:
@@ -331,11 +392,11 @@ def _iter_python(root: Path) -> Iterable[Path]:
 
 
 def _exempt(path: Path) -> bool:
-    return any(part in _EXEMPT_NAMES for part in path.parts)
+    return any(part in _EXEMPT_NAMES for part in path.parts) or _is_test_module(path.name)
 
 
 def find_unscoped_queries(
-    tenant_root: str = "auth.User",
+    tenant_root: str = DEFAULT_TENANT_ROOT,
     search_path: str | None = None,
     max_depth: int = 4,
     include_exempt: bool = False,
@@ -356,6 +417,7 @@ def find_unscoped_queries(
     if not root_dir.is_dir():
         raise ValueError(f"search_path is not a directory: {root_dir}")
 
+    tenant_root, tenant_root_note = resolve_tenant_root(tenant_root)
     paths = _ownership_paths(tenant_root, max_depth)
     by_class = {m.__name__: m._meta.label for m in apps.get_models()}
 
@@ -494,6 +556,7 @@ def find_unscoped_queries(
     }
     return {
         "tenant_root": tenant_root,
+        "tenant_root_note": tenant_root_note,
         "search_path": str(root_dir),
         "files_scanned": scanned,
         "queryset_chains_seen": chains_seen,

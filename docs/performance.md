@@ -94,6 +94,31 @@ contrib, DRF, taggit and django-filters, installed into a `.venv` **inside**
 the project directory. Everything under the root is not everything that is
 yours, and the fix is in the changelog.
 
+### And a second one, because one stranger is not a sample
+
+Wagtail found one defect. Saleor - 4332 files, 122 models, GraphQL instead of
+DRF, a custom user model - found three more on its first run, none of which
+Wagtail could have shown:
+
+```bash
+git clone --depth 1 https://github.com/saleor/saleor.git
+cd saleor && uv venv --python 3.12 && uv sync --frozen
+uv pip install django-chainsaw-mcp
+SECRET_KEY=x DATABASE_URL=sqlite:///db.sqlite3 \
+DJANGO_CHAINSAW_PROJECT_PATH=. DJANGO_CHAINSAW_SETTINGS_MODULE=saleor.settings \
+  django-chainsaw check
+```
+
+**968 s of user CPU** (1069 s wall), 21 checks, none failed after the fixes,
+two correctly not applicable.
+
+That number carries the caveat. Wagtail's 1386 files cost 142 s and Saleor's
+4332 cost 968: 3.1x the files for 6.2x the time. The cost is **not linear in
+file count**, and this page should not be read as though it were. Two
+plausible causes - deeper call graphs and more relations per model, both of
+which the checks that walk them pay for - and neither has been measured, so
+neither is stated as the reason. What is measured is the ratio.
+
 ### Where the half minute goes
 
 Each check on its own, on the same project. Every one of these includes about

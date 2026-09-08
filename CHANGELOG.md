@@ -16,6 +16,33 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **A ternary in a signal receiver took down the whole check.** `ast.If.body`
+  is a list of statements and `ast.IfExp.body` is a single expression, and
+  both were read as a list, so `x = a if cond else b` raised
+  `TypeError: 'Constant' object is not iterable` out of `bypass` - killing the
+  check rather than skipping one receiver. Wagtail has no ternary in a
+  receiver and never showed it; Saleor does. `bypass` goes from failed to 183
+  findings there.
+- **`tenancy` never ran on a project with a custom user model,** which is most
+  serious Django projects. The default root was `auth.User`, and a project
+  that replaced the user model has no `auth.User` at all - so the default was
+  not a weaker answer, it was no answer: the check refused and listed forty
+  models it might have meant. The default now resolves through
+  `AUTH_USER_MODEL`, which is where Django keeps that answer. Only the
+  default: a root somebody typed is never quietly replaced, because a report
+  about the wrong root is worse than an error, and the substitution travels
+  with the report as `tenant_root_note`. On Saleor the check went from failing
+  to 35 scoped models.
+- **The tenancy exemption knew `tests.py` and not `tests/`.** The first is
+  what `startproject` gives you; the second is what every project past a
+  certain size uses, so the documented promise that tests are skipped held for
+  small projects and quietly failed for large ones. `tests/`, `testing/`,
+  `test_*.py` and `*_test.py` are all exempt now. On Saleor: **1992 findings
+  became 263** - 87% of the output had been test code the check never meant to
+  read. This one changes results on real projects more than the other two.
+
+### Fixed
+
 - **A virtualenv inside the project directory made every installed package
   look like one of the project's own apps.** `deploy_safety` asked only
   whether an app's path was under the project root, and with the normal
@@ -172,6 +199,17 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A second public project in the reproducible-run docs.** One stranger's
+  codebase is not a sample: Wagtail found the vendored-app bug and none of the
+  three above. Saleor - 4332 files, 122 models, GraphQL rather than DRF, a
+  custom user model - found all three on its first run.
+  `docs/performance.md` carries the commands and the honest scaling note:
+  1386 files cost 142 s of CPU and 4332 cost 968, so 3.1x the files is 6.2x
+  the time and the cost is **not** linear in file count. Two plausible causes,
+  neither measured, so neither claimed.
 
 ### Added
 

@@ -161,6 +161,20 @@ is stated in the output of every run:
 **Candidates, not vulnerabilities.** The value is shortening the list a human
 has to read, not closing the question.
 
+
+## What it does not read
+
+Admin, management commands, migrations, factories and tests, because an
+unscoped queryset there is usually deliberate. `include_exempt=True` scans
+them anyway.
+
+"Tests" means both layouts: a `tests.py` module, a `tests/` package, and a
+file named `test_*.py` or `*_test.py` anywhere. Only the first was listed
+until Saleor showed what that costs - 1992 findings became 263 once the
+`tests/` package was excluded, so **87% of the output had been test code the
+check never meant to read**. If your project has a differently named test
+directory, it is still scanned, and the file list in the report will say so.
+
 ## Where it fits
 
 `deploy_safety` answers a question about time: has the code caught up with the
