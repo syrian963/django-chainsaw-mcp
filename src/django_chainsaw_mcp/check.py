@@ -696,8 +696,14 @@ def run_all(
 
     failed = [name for name, state in ran.items() if not state["ok"]]
     warning = _registry_warning()
+    try:
+        from .django_env import database_reachable
+        _, database_warning = database_reachable()
+    except Exception:
+        database_warning = None
     return {
         "registry_warning": warning,
+        "database_warning": database_warning,
         "frameworks": dict(profile.frameworks) if profile is not None else {},
         "checks_not_applicable": not_applicable,
         "checks_run": ran,

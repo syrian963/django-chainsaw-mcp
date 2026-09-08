@@ -88,6 +88,7 @@ def serializer_exposure(include_safe: bool = False) -> dict[str, Any]:
     classes = _serializer_classes()
     if not classes:
         return {
+        "slow_imports": discovered.get("slow_imports", []),
             "rest_framework_installed": False,
             "serializer_count": 0,
             "findings": [],

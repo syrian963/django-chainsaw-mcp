@@ -472,3 +472,63 @@ def test_a_fast_run_does_not_print_a_timing_table(django_project, monkeypatch, c
 
     run("check")
     assert "in the checks. The slowest" not in capsys.readouterr().out
+
+
+def test_project_info_is_a_command_the_documentation_can_send_people_to(
+    django_project, capsys
+):
+    """It was in the MCP server, four doc pages and the bug report template.
+
+    Not in the CLI:
+
+        django-chainsaw: error: argument command: invalid choice: 'project-info'
+
+    The issue template asks a reporter what `django-chainsaw project-info`
+    said, and every "it found nothing" answer starts there.
+    """
+    assert run("project-info") == EXIT_OK
+    printed = capsys.readouterr().out
+    assert "Django" in printed
+    assert "settings" in printed or "demoshop" in printed
+    assert "models" in printed
+    assert "database" in printed
+
+
+def test_project_info_reports_a_failed_boot_rather_than_raising(monkeypatch, capsys):
+    from django_chainsaw_mcp import cli as cli_module
+    from django_chainsaw_mcp.django_env import DjangoBootError
+
+    def refuse():
+        raise DjangoBootError("no settings module here")
+
+    monkeypatch.setattr(cli_module, "_cmd_project_info", cli_module._cmd_project_info)
+    import django_chainsaw_mcp.django_env as env
+
+    monkeypatch.setattr(env, "ensure_django", refuse)
+    assert run("project-info") == EXIT_FINDINGS
+    printed = capsys.readouterr().out
+    assert "Could not load the project" in printed
+    assert "no settings module here" in printed
+
+
+def test_project_info_warns_about_an_empty_registry(monkeypatch, django_project, capsys):
+    from django.apps import apps
+
+    monkeypatch.setattr(apps, "get_models", lambda *a, **k: [])
+    run("project-info")
+    printed = capsys.readouterr().out
+    assert "defines no models" in printed
+
+
+def test_project_info_warns_about_an_unreachable_database(monkeypatch, django_project, capsys):
+    from django.conf import settings
+
+    monkeypatch.setattr(
+        settings, "DATABASES",
+        {"default": {"ENGINE": "django.db.backends.postgresql",
+                     "HOST": "127.0.0.1", "PORT": 1}},
+        raising=False,
+    )
+    run("project-info")
+    printed = capsys.readouterr().out
+    assert "did not answer" in printed

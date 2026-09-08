@@ -202,15 +202,20 @@ when the two disagree:
   working. Compare the CPU column, not the wall column.
 ```
 
-**One thing in that output is not contention.** `n+1-serializer` reads 23
+**One thing in that output was not contention, and it is now explained.** `n+1-serializer` reads 23
 seconds of CPU against 563 seconds of wall, reproducibly, in runs where every
 other check has wall equal to CPU. It is blocked on something outside this
 process for around nine minutes - and since that check imports the target's
 serializer modules, and an import can open a connection or reach the network,
-that is the first place to look. It has not been diagnosed here. It is
-recorded because a number nobody can explain is worth more written down than
-rounded off, and because neither a CPU-only nor a wall-only measurement would
-have shown it at all.
+that is where it was. Two modules touch the database while being imported,
+and the project was configured for a PostgreSQL host that does not resolve
+outside Docker, so each attempt waited out a connect timeout: 440 s in
+ for 0.14 s of CPU. Pointed at a SQLite
+file the same check costs 28 s.
+
+A two-second socket probe now reports an unreachable database before the run
+starts, and every import over a second is named with its wall and CPU. Neither
+a CPU-only nor a wall-only measurement would have found this at all.
 
 ### Where the half minute goes
 

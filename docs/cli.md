@@ -24,6 +24,38 @@ Commands only return `1` when a gate is requested. Without a gate they are
 reporting tools and always exit `0`, so adding one to a pipeline never breaks it
 by surprise.
 
+## `project-info`, the one to run when something looks wrong
+
+```bash
+django-chainsaw project-info
+```
+
+The smallest command that proves the setup: Django loaded, from which settings
+module, how many apps and models it found, which database it is configured for
+and whether that database answers.
+
+Almost every "it found nothing" is one of two things, and both show up here.
+
+**No models.** A settings module can import cleanly and load nothing - a base
+or partial one rather than the module the site runs on. Eighteen of the
+twenty-one checks read the model registry, so they would report zero whatever
+the project contains.
+
+**A database nobody is listening to.** Nothing here needs the database to run,
+but the tool imports the modules that declare serializers, views and URLs, and
+a module that touches the database while being imported waits out a connect
+timeout. On DefectDojo, configured for `postgres:3306` and run outside Docker,
+that turned a 28-second check into a 567-second one - of which 26 seconds was
+actual work. A two-second probe now says so first:
+
+```
+WARNING: The database this project is configured to use - postgres:3306 -
+did not answer within 2s (gaierror). ...
+```
+
+The same warning appears on a full `check` run, and both are in the JSON as
+`database_warning` and `registry_warning`.
+
 ## `check`, the one to start with
 
 ```bash

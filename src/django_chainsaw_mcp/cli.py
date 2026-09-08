@@ -1336,6 +1336,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
         if report.get("registry_warning"):
             print()
             print("WARNING: " + report["registry_warning"])
+        if report.get("database_warning"):
+            print()
+            print("WARNING: " + report["database_warning"])
         if project.source:
             print(f"Settings from {project.source}")
         if report["checks_failed"]:
@@ -1896,6 +1899,72 @@ def _cmd_models(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_project_info(args: argparse.Namespace) -> int:
+    """The smallest call that proves the setup, for people not using MCP.
+
+    Both halves of a wrong answer show up here: a settings module that loads
+    nothing, and a database the target's own imports will wait on.
+    """
+    from .django_env import DjangoBootError, database_reachable, ensure_django
+
+    try:
+        config = ensure_django()
+    except DjangoBootError as exc:
+        report = {"ok": False, "error": str(exc)}
+        _emit(report, args.json)
+        if not args.json:
+            print("Could not load the project.")
+            print()
+            print(str(exc))
+        return EXIT_FINDINGS
+
+    import django
+    from django.apps import apps
+    from django.conf import settings
+
+    labels = [cfg.label for cfg in apps.get_app_configs()]
+    models = apps.get_models()
+    reachable, database_warning = database_reachable()
+
+    report = {
+        "ok": True,
+        "django_version": django.get_version(),
+        "settings_module": config.settings_module,
+        "project_path": str(config.project_path),
+        "debug": settings.DEBUG,
+        "installed_apps": labels,
+        "app_count": len(labels),
+        "model_count": len(models),
+        "database_engines": {
+            alias: conf.get("ENGINE", "") for alias, conf in settings.DATABASES.items()
+        },
+        "database_reachable": reachable,
+        "database_warning": database_warning,
+    }
+    _emit(report, args.json)
+
+    if not args.json:
+        print(f"Django {report['django_version']} loaded from "
+              f"{report['settings_module']}")
+        print(f"  project path   {report['project_path']}")
+        print(f"  apps           {report['app_count']}")
+        print(f"  models         {report['model_count']}")
+        for alias, engine in report["database_engines"].items():
+            print(f"  database       {alias}: {engine.rsplit('.', 1)[-1]}")
+        print(f"  DEBUG          {report['debug']}")
+
+        if not models:
+            print()
+            print("WARNING: this settings module defines no models. Most "
+                  "checks read the model registry, so they would report "
+                  "nothing whatever the project contains.")
+        if database_warning:
+            print()
+            print("WARNING: " + database_warning)
+
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="django-chainsaw",
@@ -2028,6 +2097,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any task given the wrong thing")
     p.set_defaults(func=_cmd_celery)
+
+    p = sub.add_parser(
+        "project-info",
+        help="check that the target project loads, and report what it is",
+    )
+    p.set_defaults(func=_cmd_project_info)
 
     p = sub.add_parser("dangling",
                        help="URL names and template names nothing will resolve")

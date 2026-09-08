@@ -143,8 +143,10 @@ def load_serializer_modules(root: Path) -> dict[str, Any]:
     imported: list[str] = []
     already: list[str] = []
     failed: list[dict[str, str]] = []
+    slow: list[dict[str, Any]] = []
 
     import sys
+    import time
 
     for path in sorted(root.rglob("*.py")):
         if any(part in _SKIP_DIRS for part in path.parts):
@@ -162,16 +164,31 @@ def load_serializer_modules(root: Path) -> dict[str, Any]:
         if module in sys.modules:
             already.append(module)
             continue
+        started = time.perf_counter()
+        started_cpu = time.process_time()
         try:
             importlib.import_module(module)
             imported.append(module)
         except Exception as exc:
             failed.append({"module": module, "error": f"{type(exc).__name__}: {exc}"})
+        waited = time.perf_counter() - started
+        # A second of wall clock for one import is already unusual. Recording
+        # the CPU beside it separates "this module does a lot of work" from
+        # "this module waited on something", which are different problems and
+        # only the second one is nine minutes long.
+        if waited >= 1.0:
+            slow.append({
+                "module": module,
+                "seconds": round(waited, 2),
+                "cpu_seconds": round(time.process_time() - started_cpu, 2),
+            })
 
+    slow.sort(key=lambda entry: -entry["seconds"])
     result = {
         "imported": imported,
         "already_loaded": already,
         "failed": failed,
+        "slow_imports": slow[:10],
         "note": (
             "Modules declaring a serializer are imported so that a subclass walk "
             "can see them. Django only imports models.py, admin.py and whatever "

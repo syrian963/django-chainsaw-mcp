@@ -26,6 +26,62 @@ class DjangoBootError(RuntimeError):
     """Raised when the target project cannot be loaded."""
 
 
+def database_reachable(timeout: float = 2.0) -> tuple[bool, str | None]:
+    """Whether the configured default database answers a TCP connect.
+
+    Not a query and not a Django connection: a socket, opened and closed, with
+    a short timeout. The point is to fail fast where Django's own driver would
+    wait, and to be able to say so before the analysis starts.
+
+    A file-backed engine - SQLite - is always reachable, and an engine this
+    cannot read the host from is reported as unknown rather than unreachable,
+    because a wrong warning about a working database is worse than none.
+    """
+    import socket
+
+    try:
+        from django.conf import settings
+    except Exception:
+        return True, None
+
+    try:
+        default = settings.DATABASES.get("default") or {}
+    except Exception:
+        return True, None
+
+    engine = str(default.get("ENGINE", ""))
+    if "sqlite" in engine or not engine:
+        return True, None
+
+    host = default.get("HOST") or "localhost"
+    port = default.get("PORT")
+    if not port:
+        port = {"postgresql": 5432, "postgis": 5432, "mysql": 3306,
+                "oracle": 1521}.get(engine.rsplit(".", 1)[-1])
+    if not port:
+        return True, None
+
+    # A unix socket path in HOST is not something to connect to by TCP.
+    if str(host).startswith("/"):
+        return True, None
+
+    try:
+        with socket.create_connection((str(host), int(port)), timeout=timeout):
+            return True, None
+    except OSError as exc:
+        return False, (
+            f"The database this project is configured to use - {host}:{port} - "
+            f"did not answer within {timeout:g}s ({exc.__class__.__name__}). "
+            "Nothing here needs it to run, but any module that touches the "
+            "database while being imported will wait out a connect timeout, "
+            "and this tool imports the modules that declare serializers, "
+            "views and URLs. On one real project that turned a 28-second "
+            "check into a 567-second one, of which 26 seconds was actual "
+            "work. Point the settings at a reachable database, or at a "
+            "SQLite file, before reading any timing from this run."
+        )
+
+
 def _configures_settings_in_code(root: Path) -> str | None:
     """The file where this project configures Django without a settings module.
 

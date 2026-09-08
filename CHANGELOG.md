@@ -16,6 +16,16 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **`project-info` did not exist.** It is in the MCP server, in four
+  documentation pages, in the bug report template - which asks reporters what
+  `django-chainsaw project-info` said - and in an error message this tool
+  prints. It was not a CLI command, so anybody following that advice got
+  `invalid choice: 'project-info'`. It exists now, and reports the two things
+  that explain almost every empty result: how many models loaded, and whether
+  the configured database answers.
+
+### Fixed
+
 - **`deploy-safety` walked the whole tree once per migration operation.**
   Measured on DefectDojo, where it was **77% of the entire run**: 356.8 s for
   158 destructive operations over 2001 files, which is 2.26 s each and exactly
@@ -356,6 +366,29 @@ every change so far belongs to this release.
   generated one: 338 s for a full `check` on 2120 files and 424 models, against
   35 s on the synthetic project of similar size. The generated project has
   shallow call graphs and the checks that walk one pay for that difference.
+
+### Added
+
+- **A two-second check for a database nobody is listening to.** The
+  nine-minute wait recorded in the last release notes is explained, and it was
+  not contention. On DefectDojo, configured for `postgres:3306` and run
+  outside Docker, `n+1-serializer` costs **567 s of wall clock for 26 s of
+  CPU**; pointed at a SQLite file, the same check costs 28 s. Two modules
+  account for it - `dojo.location.api.endpoint_compat` at 440 s wall and
+  0.14 s CPU, and `dojo.api_v2.serializers` at 101 s - and both touch the
+  database while being imported.
+
+  The tool has to import those modules to read them, and an import cannot be
+  interrupted safely: killing one halfway leaves a partial entry in
+  `sys.modules` and the next import of it succeeds with a broken module. So
+  it spends two seconds on a bounded socket probe instead, and says so before
+  the analysis rather than after. `database_warning` is in the JSON, printed
+  by `check` and by `project-info`.
+
+- **Every import over a second is timed and named,** with CPU beside wall -
+  which is what separates a module doing work from one waiting, and what
+  identified the two above. The list is in the serializer checks as
+  `slow_imports`.
 
 ### Added
 

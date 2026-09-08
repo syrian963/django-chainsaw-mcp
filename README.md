@@ -3,10 +3,10 @@
 ![release](https://img.shields.io/badge/release-v0.1.0-1f6feb?style=for-the-badge)
 ![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
 ![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
-![CLI commands](https://img.shields.io/badge/CLI%20commands-34-6e7681?style=for-the-badge)
+![CLI commands](https://img.shields.io/badge/CLI%20commands-35-6e7681?style=for-the-badge)
 ![prompts](https://img.shields.io/badge/prompts-5-8250df?style=for-the-badge)
 
-![tests](https://img.shields.io/badge/tests-389-2ea043?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-405-2ea043?style=for-the-badge)
 ![coverage](https://img.shields.io/badge/coverage-86%25-2ea043?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-f1c40f?style=for-the-badge&logo=python&logoColor=white)
 ![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-0C4B33?style=for-the-badge&logo=django&logoColor=white)
