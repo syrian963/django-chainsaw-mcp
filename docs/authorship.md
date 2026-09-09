@@ -93,29 +93,36 @@ A git author line is just text. Anybody can set `user.name` to any name and
 write commits that claim to be from anybody. **A signature cannot be forged
 without the private key.**
 
-There is no signing key on this machine yet. Creating cryptographic identity
-material is a decision for the person it identifies, so here are the commands
-rather than a key that was generated for you.
+Signing is set up. An ed25519 key, `commit.gpgsign` and `tag.gpgsign` on, and
+the public half registered on the account as a *signing* key:
 
 ```bash
-ssh-keygen -t ed25519 -C "mnouralsakka@gmail.com" -f ~/.ssh/id_ed25519_signing
-```
-
-```bash
+ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519_signing
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/id_ed25519_signing.pub
 git config --global commit.gpgsign true
 git config --global tag.gpgsign true
-```
-
-Then add the **public** key to GitHub twice: once under *SSH keys* as a signing
-key, and once as an *authentication* key if it will also be used for pushing.
-Commits then show a **Verified** badge, and that badge is not something a copier
-can reproduce.
-
-```bash
 git log --show-signature -1
 ```
+
+**The part that is easy to get wrong.** GitHub does not check the signature
+against the key you registered. It looks up the account that owns the
+**commit's email address**, and then looks for a signing key on *that*
+account. The first signed commit here came back `unknown_key` with a perfectly
+valid signature, because the commit email belonged to one account and the key
+had been added to another - the one that owns this repository, the PyPI
+package and the trusted publisher.
+
+So the commit email is set per repository to an address verified on the
+account that owns it, rather than the global one:
+
+```bash
+git config user.email "the-address-verified-on-that-account"
+```
+
+`gh api repos/OWNER/REPO/commits/HEAD --jq .commit.verification` says which of
+the two is wrong: `unknown_key` means the account has no signing key,
+`unverified_email` means the address is not on any account.
 
 Existing commits stay unsigned. Rewriting history to sign them retroactively is
 possible and not worth it: the signed ones from here on establish the pattern,
