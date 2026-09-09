@@ -21,7 +21,11 @@ echo "--since lifecycle"
 # A repository with the demo project inside it.
 cp -r testprojects "$REPO/testprojects"
 cd "$REPO" || exit 2
-git init -q .
+# `-b main` explicitly: git's default first-branch name is still `master`,
+# and this script asks for `--since main` below. Without it the script passes
+# only on machines whose `init.defaultBranch` is already `main` - which is why
+# it went green here for four days and red the first time CI ran it.
+git init -q -b main .
 git config user.email t@example.com
 git config user.name Test
 git add -A
