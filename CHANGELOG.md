@@ -3,7 +3,7 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.4] - 2026-09-09
 
 ### Added
 
@@ -57,6 +57,30 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   guard. Found by reverting each guard in turn and watching which tests failed
   - two did not. The tests now key on the enclosing function name instead, and
   all five go red when their guard is removed.
+
+- **The server introduced itself as 0.1.0 for three releases.** The version was
+  written out by hand in three places and only one of them was ever updated, so
+  a client asking the server who it was got an answer that had been wrong since
+  the first tag. There is now one `__version__`, read from the installed
+  package metadata, and a documentation gate that fails when a version is
+  spelled out anywhere it can be derived.
+
+- **The local runner did not lint, so CI failed on an unused import.**
+  Seventeen suites green here, three jobs red on GitHub nine seconds in, over
+  one leftover `from pathlib import Path`. CI runs `ruff check src/ tests/` as
+  its first step and `run_tests.sh` never did. A local runner that passes what
+  the pipeline fails is worse than no local runner, because it is trusted; it
+  now runs the same invocation, first.
+
+### Changed
+
+- **The README stopped promising an invocation that cannot work.** It offered
+  `uvx django-chainsaw-mcp`, and `uvx` builds an isolated environment - which
+  is exactly what a tool that has to import your project cannot use. It starts
+  and then fails every check. The install section now says plainly that it must
+  run in an interpreter that can import the project, gives the two ways to do
+  that, and a documentation gate rejects a bare `uvx` invocation in a code
+  fence.
 
 ## [0.1.3] - 2026-09-09
 
