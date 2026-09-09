@@ -26,10 +26,11 @@ Measured against Django 6.1, on a related manager whose parent was prefetched:
     .count() .exists() .all() .all()[0] .all()[:2]         read the cache
 
 `.count()` and `.exists()` are in the second group, which is not obvious and
-is why they are not reported: since Django 4.1 the related manager answers
-both from the prefetched result. Only the first group is flagged, and every
-method in it re-queries on every Django version, so a finding here does not
-depend on which one the project runs.
+is why they are not reported: the related manager answers both from the
+prefetched result, so rewriting them changes nothing. Measured on 4.2 and 6.1,
+the ends of the range this supports. Only the first group is flagged, and
+every method in it re-queries on both, so a finding here does not depend on
+which version the project runs.
 
 ## What exists
 

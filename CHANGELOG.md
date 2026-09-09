@@ -3,6 +3,23 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A version attribution nobody had checked.** `defeated_prefetches` shipped
+  saying `.count()` and `.exists()` had been answered from the prefetch cache
+  "since Django 4.1". The behaviour is real and was measured; the version was
+  not. Django's 4.1 release notes do not mention it, and the claim went into a
+  module docstring, a documentation page and a changelog entry on the strength
+  of a recollection.
+
+  Measured instead: identical results on 4.2, the oldest version this supports,
+  and on 6.1. That is the claim the pages make now. Every method the check does
+  report re-queries on both, so no finding depended on the wrong sentence — but
+  a repository that asks other people to distrust unmeasured claims does not
+  get to ship one.
+
 ## [0.1.4] - 2026-09-09
 
 ### Added
@@ -21,9 +38,10 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   `.select_related()`, `.annotate()` and `.reverse()` each cost 12 queries
   where the cache costs 2. `.count()`, `.exists()`, `.all()` and a slice cost
   2 - the related manager has answered `count` and `exists` from the prefetch
-  since Django 4.1, which is not obvious, and reporting them would be a
-  finding whose fix changes nothing. Only the first group is reported, and
-  every method in it re-queries on earlier Django versions too.
+  since Django 4.1 *(the behaviour is right and measured; the version is
+  wrong, see the correction above)*, which is not obvious, and reporting them
+  would be a finding whose fix changes nothing. Only the first group is
+  reported, and every method in it re-queries on earlier Django versions too.
 
   Reported only where the prefetch and the accessor are provably the same
   object: a name bound in the same scope, or the loop variable iterating one.
