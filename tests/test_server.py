@@ -296,3 +296,61 @@ def test_a_model_argument_completes_from_the_real_project():
 
     unrelated = SimpleNamespace(name="severity", value="h")
     assert asyncio.run(server.complete_argument(None, unrelated, None)) is None
+
+
+def test_the_handshake_does_not_announce_a_version_of_its_own(django_project):
+    """Three releases introduced the server as 0.1.0.
+
+    The version in the handshake was a string in the source, and the release
+    gates compare the tag, pyproject.toml, server.json and the changelog -
+    none of them look inside the code. So the package went to PyPI as 0.1.3
+    while every client that connected was told 0.1.0, and the same string was
+    stamped into every SARIF file the tool produced.
+
+    Found by driving the published package over the transport rather than
+    reading the source.
+    """
+    import tomllib
+    from pathlib import Path as P
+
+    from django_chainsaw_mcp import __version__
+    from django_chainsaw_mcp.server import mcp
+
+    meta = tomllib.loads(P("pyproject.toml").read_text(encoding="utf-8"))
+    declared = meta["project"]["version"]
+
+    assert __version__ == declared, "the installed package disagrees with pyproject"
+    assert mcp.version == declared, (
+        f"the handshake says {mcp.version} and the package is {declared}"
+    )
+
+
+def test_sarif_stamps_the_version_that_produced_it(django_project):
+    # A SARIF file goes into somebody's code-scanning history and stays there.
+    # Naming the wrong version makes it impossible to tell which run found
+    # what, which is most of the point of keeping them.
+    import inspect
+    import tomllib
+    from pathlib import Path as P
+
+    from django_chainsaw_mcp import sarif
+
+    declared = tomllib.loads(
+        P("pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+
+    for name in ("to_sarif", "dumps"):
+        default = inspect.signature(
+            getattr(sarif, name)
+        ).parameters["tool_version"].default
+        assert default == declared, f"sarif.{name} defaults to {default}"
+
+
+def test_a_source_checkout_that_was_never_installed_still_imports():
+    # `__version__` reads package metadata, which is absent in a bare
+    # checkout. Raising there would make the whole package unimportable for
+    # anybody who cloned it and ran a script without installing.
+    import django_chainsaw_mcp
+
+    assert isinstance(django_chainsaw_mcp.__version__, str)
+    assert django_chainsaw_mcp.__version__

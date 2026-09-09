@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from . import __version__
+
 SARIF_VERSION = "2.1.0"
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 
@@ -40,7 +42,7 @@ def _split_location(location: str | None) -> tuple[str | None, int | None]:
     return location, None
 
 
-def to_sarif(report: dict[str, Any], tool_version: str = "0.1.0") -> dict[str, Any]:
+def to_sarif(report: dict[str, Any], tool_version: str = __version__) -> dict[str, Any]:
     """Convert a `check.run_all` report into a SARIF log."""
     rules: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
@@ -122,5 +124,5 @@ def to_sarif(report: dict[str, Any], tool_version: str = "0.1.0") -> dict[str, A
     }
 
 
-def dumps(report: dict[str, Any], tool_version: str = "0.1.0") -> str:
+def dumps(report: dict[str, Any], tool_version: str = __version__) -> str:
     return json.dumps(to_sarif(report, tool_version), indent=2)

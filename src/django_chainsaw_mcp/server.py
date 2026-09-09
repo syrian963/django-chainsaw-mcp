@@ -22,6 +22,7 @@ import anyio.to_thread
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import ToolAnnotations
 
+from . import __version__
 from .aggregates import multiplied_aggregates as _multiplied_aggregates
 from .amplification import amplification as _amplification
 from .api_contract import CONTRACT_FILE as _CONTRACT_FILE
@@ -108,7 +109,7 @@ them on is the difference between a useful report and a misleading one.
 mcp = MCPServer(
     "django-chainsaw",
     title="Django Chainsaw",
-    version="0.1.0",
+    version=__version__,
     instructions=INSTRUCTIONS,
     website_url="https://github.com/syrian963/django-chainsaw-mcp",
 )
