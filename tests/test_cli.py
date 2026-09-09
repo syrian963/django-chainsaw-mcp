@@ -532,3 +532,56 @@ def test_project_info_warns_about_an_unreachable_database(monkeypatch, django_pr
     run("project-info")
     printed = capsys.readouterr().out
     assert "did not answer" in printed
+
+
+# --- the release body the workflow reads out of the changelog --------------
+
+
+def _release_notes():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "release_notes.py"
+    spec = importlib.util.spec_from_file_location("release_notes", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, path.parent / "CHANGELOG.md"
+
+
+def test_the_version_being_shipped_has_release_notes():
+    # The workflow builds the GitHub release body from this. A version with no
+    # changelog section produced a release with an empty body, which is how
+    # the Releases page ended up saying less than the tag list did.
+    import tomllib
+    from pathlib import Path
+
+    module, changelog = _release_notes()
+    root = Path(__file__).resolve().parent.parent
+    version = tomllib.loads(
+        (root / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+
+    body = module.section(changelog.read_text(encoding="utf-8"), version)
+    assert body.startswith(f"## [{version}]")
+    assert len(body.splitlines()) > 3, "a heading and nothing under it"
+
+
+def test_a_version_with_no_section_is_an_error_not_an_empty_body():
+    import pytest
+
+    module, changelog = _release_notes()
+    with pytest.raises(LookupError):
+        module.section(changelog.read_text(encoding="utf-8"), "9.9.9")
+
+
+def test_the_unreleased_heading_is_never_offered_as_a_release():
+    # "Unreleased" is a real heading in this file and would match the split.
+    # Naming it as a tag has to fail rather than publish the next version's
+    # notes under this one's number.
+    import pytest
+
+    module, changelog = _release_notes()
+    text = changelog.read_text(encoding="utf-8")
+    assert module.section(text, "0.1.4").startswith("## [0.1.4]")
+    with pytest.raises(LookupError):
+        module.section(text.replace("## [0.1.4]", "## [Unreleased]"), "0.1.4")
