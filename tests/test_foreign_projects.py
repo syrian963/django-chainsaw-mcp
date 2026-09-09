@@ -988,6 +988,77 @@ def test_the_check_itself_says_it_in_the_note(django_project, monkeypatch):
     assert report["migration_count"] > 0
 
 
+# --- a fix whose two halves are the same text -------------------------------
+
+
+def _tenancy_fix(source: str, tmp_path):
+    """Build the advisory fixes for one file of source."""
+    from django_chainsaw_mcp.fixes import build_fixes
+
+    (tmp_path / "views.py").write_text(source)
+    return build_fixes(  # returns a FixSet, not a list
+        {
+            "tenancy": {
+                "findings": [
+                    {
+                        "model": "shop.Order",
+                        "file": "views.py",
+                        "line": 3,
+                        "why": "unscoped",
+                        "owner_path": "customer",
+                        "chain": "objects",
+                        "severity": "high",
+                    }
+                ]
+            }
+        },
+        tmp_path,
+    )
+
+
+def test_a_queryset_with_no_rewritable_entry_point_offers_no_rewrite(tmp_path, django_project):
+    """`re.sub` returns the subject unchanged when nothing matches.
+
+    The pattern knows `.all()`, `.filter(`, `.get(` and `.exclude(`. A
+    queryset that starts at a custom manager method matches none of them, so
+    the "fix" came back identical to the original and was printed as a diff
+    whose `-` and `+` lines are the same text.
+
+    On healthchecks that was 13 of 37 advisory suggestions. Nothing was ever
+    written - advisory fixes are not what `--write` touches - so the damage
+    was to the report rather than to anybody's source, which does not make it
+    a smaller lie.
+    """
+    fixes = _tenancy_fix(
+        "def view(request):\n"
+        "    from shop.models import Order\n"
+        "    orders = Order.objects.for_user(request.user)\n",
+        tmp_path,
+    )
+    tenancy = [f for f in fixes.fixes if f.check == "tenancy"]
+    assert tenancy, "the finding itself must survive - the queryset is unscoped"
+    for fix in tenancy:
+        assert fix.new != fix.old, "a rewrite identical to the original is not a rewrite"
+        assert fix.new is None
+        assert "no mechanical place" in fix.caution
+
+
+def test_a_standard_entry_point_still_gets_its_rewrite(tmp_path, django_project):
+    # The narrowing must not cost the case the fixer exists for.
+    fixes = _tenancy_fix(
+        "def view(request):\n"
+        "    from shop.models import Order\n"
+        "    orders = Order.objects.filter(status='new')\n",
+        tmp_path,
+    )
+    tenancy = [f for f in fixes.fixes if f.check == "tenancy"]
+    assert tenancy
+    rewritten = [f for f in tenancy if f.new]
+    assert rewritten, "a .filter() queryset has somewhere to insert the scope"
+    assert "customer=request.user" in rewritten[0].new
+    assert rewritten[0].new != rewritten[0].old
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 

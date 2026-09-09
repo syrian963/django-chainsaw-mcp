@@ -335,6 +335,21 @@ def _tenancy_fixes(report: dict[str, Any], root: Path) -> list[Fix]:
                 f"whether {owner_path} points at a user, a profile or an "
                 "organisation is a question about your domain, not your syntax."
             )
+            if replaced == original:
+                # `re.sub` returns the subject unchanged when nothing matched,
+                # and the pattern above only knows the four standard entry
+                # points. A queryset that starts at a custom manager method -
+                # `Profile.objects.for_user(...)` - reaches here with a
+                # rewrite identical to the original, and offering that as a
+                # fix is a diff whose two halves are the same text.
+                replaced = None
+                caution = (
+                    f"The queryset does not start at .all(), .filter(), .get() "
+                    f"or .exclude(), so there is no mechanical place to insert "
+                    f"{owner_path}={scope}. It likely goes through a custom "
+                    "manager method, and the scoping belongs inside that method "
+                    "or in an argument to it."
+                )
         else:
             replaced = None
             caution = (

@@ -3,6 +3,25 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A third of the tenancy suggestions proposed no change at all.** `re.sub`
+  returns the subject unchanged when the pattern does not match, and the
+  pattern knows `.all()`, `.filter(`, `.get(` and `.exclude(`. A queryset that
+  starts at a custom manager method - `Profile.objects.for_user(request.user)`
+  - matches none of them, so the rewrite came back identical to the original
+  and was printed as a diff whose `-` and `+` lines are the same text.
+
+  On healthchecks, 13 of 37. Nothing was ever written, because `--write` only
+  touches mechanical fixes and these are advisory, so the damage was to the
+  report rather than to anybody's source - which does not make it a smaller
+  lie. The finding stays, because the queryset really is unscoped; what goes
+  is the pretence that there is a mechanical rewrite, replaced by a sentence
+  saying where the scoping actually belongs. Found by running the published
+  package against a project it had never seen.
+
 ## [0.1.1] - 2026-09-09
 
 Registry publication only. No behaviour changed.
