@@ -2252,3 +2252,141 @@ def test_scanning_for_nothing_walks_nothing(tmp_path):
     (tmp_path / "app.py").write_text("x = 1\n")
     assert ds._scan_all(tmp_path, set(), set(), 25) == {}
     assert ds._symbol_pattern(set()) is None
+
+
+# --- prefetches paid for and then thrown away ------------------------------
+
+
+def _prefetch():
+    """Findings in the fixture module, keyed by the function they sit in.
+
+    Keyed by function rather than by line number: three of these tests were
+    first written against literal lines, and three of those literals were off
+    by one or two, so the assertions passed without ever reaching the code
+    they were meant to guard.
+    """
+    import ast
+    from pathlib import Path
+
+    from django_chainsaw_mcp.django_env import ensure_django
+    from django_chainsaw_mcp.prefetch import defeated_prefetches
+
+    fixture = Path(ensure_django().project_path) / "shop" / "prefetching.py"
+    tree = ast.parse(fixture.read_text(encoding="utf-8"))
+    spans = [
+        (node.name, node.lineno, max(
+            getattr(child, "end_lineno", node.lineno) or node.lineno
+            for child in ast.walk(node)
+        ))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    ]
+
+    def owner(line):
+        for name, start, end in spans:
+            if start <= line <= end:
+                return name
+        return None
+
+    report = defeated_prefetches()
+    found = {}
+    for finding in report["findings"]:
+        if finding["file"].endswith("prefetching.py"):
+            found.setdefault(owner(finding["line"]), []).append(finding)
+    assert set(found) <= {name for name, _, _ in spans}, sorted(found)
+    return found, report
+
+
+def test_a_filter_on_a_prefetched_relation_is_reported_once_per_row():
+    found, _ = _prefetch()
+    hit, = found["open_lines_per_order"]
+    assert hit["severity"] == "high"
+    assert hit["relation"] == "lines"
+    assert hit["call"] == "order.lines.filter()"
+    assert "once per row" in hit["why"]
+
+
+def test_a_single_object_gets_the_lower_severity():
+    # No loop, so no N+1 - but the prefetch query is still bought and unread,
+    # and calling that critical would train people to ignore the check.
+    found, _ = _prefetch()
+    hit, = found["line_products_for"]
+    assert hit["severity"] == "medium"
+    assert "bought and never read" in hit["why"]
+
+
+def test_all_in_the_middle_does_not_hide_the_call():
+    found, _ = _prefetch()
+    hit, = found["first_reminder"]
+    assert hit["call"] == "order.reminders.first()", "order.reminders.all().first()"
+
+
+def test_count_and_exists_read_the_cache_and_are_not_reported():
+    # Measured on Django 6.1: both are answered from the prefetched result.
+    # Reporting them would be a false positive whose fix changes nothing,
+    # which is the fastest way to get a check switched off.
+    found, _ = _prefetch()
+    assert "counts_are_cached" not in found, found.get("counts_are_cached")
+
+
+def test_a_slice_of_a_prefetched_manager_is_not_reported():
+    found, _ = _prefetch()
+    assert "slicing_is_cached" not in found, found.get("slicing_is_cached")
+
+
+def test_a_prefetch_with_to_attr_is_the_fix_and_stays_quiet():
+    # to_attr="open_lines" puts the rows there and leaves order.lines
+    # unprefetched, so the filter on it is an ordinary query with no prefetch
+    # behind it to throw away.
+    found, _ = _prefetch()
+    assert "filtered_into_the_prefetch" not in found, \
+        found.get("filtered_into_the_prefetch")
+
+
+def test_a_relation_that_was_never_prefetched_belongs_to_another_check():
+    found, _ = _prefetch()
+    assert "not_prefetched_at_all" not in found, "queries_in_loops owns this one"
+
+
+def test_a_name_reassigned_before_use_no_longer_carries_the_prefetch():
+    # orders is prefetched and then rebound to a plain queryset on the next
+    # line. Collapsing both bindings into one set for the name reports the
+    # filter below as a defeated prefetch, which it is not.
+    found, _ = _prefetch()
+    assert "rebound_before_use" not in found, found.get("rebound_before_use")
+
+
+def test_the_prefetch_check_reaches_the_merged_report():
+    from django_chainsaw_mcp.check import run_all
+
+    report = run_all(only=["prefetch"])
+    assert not report["checks_failed"], report["checks_failed"]
+    assert not report["checks_not_applicable"], report["checks_not_applicable"]
+
+    ran = report["checks_run"]["prefetch"]
+    assert ran["ok"] and ran["findings"] == 4, ran
+    # An empty `examined` marks a zero nobody can interpret, and this check
+    # must never produce one.
+    assert ran["examined"].get("prefetch_sites_scanned"), ran
+
+    mine = [f for f in report["findings"] if f["check"] == "prefetch"]
+    assert mine, "the adapter dropped every finding"
+    assert all(f["file"] and f["line"] and f["fix"] for f in mine)
+
+
+def test_a_name_bound_in_another_function_is_not_matched():
+    # Saleor has lines = ...prefetch_related(...) in one function and
+    # fulfillment.lines.first() in another, a hundred lines apart. Walking the
+    # module body into its functions reported that as one finding.
+    import ast
+
+    from django_chainsaw_mcp.prefetch import _collect
+
+    tree = ast.parse(
+        "def a():\n"
+        "    orders = Order.objects.prefetch_related('lines')\n"
+        "\n"
+        "def b(order):\n"
+        "    return order.lines.filter(x=1)\n"
+    )
+    assert not _collect(tree), "module scope leaked into a function body"

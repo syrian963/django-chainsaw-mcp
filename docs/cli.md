@@ -397,6 +397,20 @@ Database work inside a loop, split into the query that uses the loop variable
 (once per row), the one that does not (the same answer N times), and the write.
 Also in the aggregate `check` as `loops`.
 
+### `prefetch`
+
+```bash
+django-chainsaw prefetch [--search-path DIR] [--include-tests] [--fail-on-findings]
+```
+
+Relations that were prefetched and then re-queried anyway, because the
+accessor asked the related manager something its cache cannot answer:
+`.filter()`, `.order_by()`, `.first()` and the rest go back to the database
+once per parent object, with the prefetch query already paid for on top.
+`.count()`, `.exists()`, `.all()` and a slice read the cache and are not
+reported. `--fail-on-findings` exits 1 only on the once-per-row findings. Also
+in the aggregate `check` as `prefetch`. Full page: [prefetch.md](prefetch.md).
+
 ### `indexes`
 
 ```bash
