@@ -399,6 +399,16 @@ def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
+    # This check is about migrations that have not run yet, and it learns
+    # which those are by reading django_migrations. When that read fails it
+    # cannot tell applied from pending, so it lists the whole history - 146 of
+    # healthchecks' 234 findings, 830 of Saleor's 3650. The finding is still
+    # worth having; presenting it as pending is not.
+    unknown = report.get("database_reachable") is False
+    caveat = (
+        " The database could not be read, so this may have been applied long "
+        "ago: applied and pending migrations could not be told apart."
+    )
     out = []
     for entry in report.get("migrations", []):
         if entry["worst_risk"] == "safe":
@@ -409,7 +419,8 @@ def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "migrations", "medium",
                 f"{entry['app']}.{entry['name']}: {entry['worst_risk'].replace('_', ' ')}",
                 f"{entry['app']}/{entry['name']}",
-                worst["detail"], worst.get("safer"),
+                worst["detail"] + (caveat if unknown else ""),
+                worst.get("safer"),
             )
         )
     return out

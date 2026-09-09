@@ -259,5 +259,13 @@ def migration_risk(include_applied: bool = False) -> dict[str, Any]:
             "Static reading of migration operations. It does not know your row "
             "counts, your PostgreSQL version or your deploy strategy, all of "
             "which change how bad a given operation actually is."
+            + (
+                "" if db_reachable else
+                "\n\nThe database could not be read, so django_migrations is "
+                "unknown and applied migrations could not be told from pending "
+                "ones. Everything in the repository's history is listed below "
+                "as though it were about to run. Point this at a reachable "
+                "database to get the pending ones on their own."
+            )
         ),
     }

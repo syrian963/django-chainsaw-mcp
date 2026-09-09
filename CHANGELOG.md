@@ -3,16 +3,20 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-09-07
+## [0.1.0] - 2026-09-09
 
-The first release, not yet tagged. 21 checks in the aggregate run, 36 MCP
-tools with five prompts, 34 CLI subcommands, 329 tests across 17 suites at
-86% coverage, and a documentation page per check that states what that
-check cannot see.
+The first release. 21 checks in the aggregate run, 36 MCP tools with five
+prompts, 35 CLI subcommands, 420 tests across 17 suites at 87% coverage, and a
+documentation page per check that states what that check cannot see.
 
-Everything below this heading is the history of getting there, newest
-first. There is no separate Unreleased section: no tag exists yet, so
-every change so far belongs to this release.
+It has been run against **eighteen public Django projects** - from channels at
+55 files to Saleor at 4332 - which found twelve defects in it that neither the
+demo project nor a private codebase had shown. `docs/tested-against.md` lists
+the runs, the defects, the two checks that have never fired on real code with
+the coverage that makes those zeroes readable, and the projects that could not
+be analysed with a reason for each.
+
+Everything below this heading is the history of getting there, newest first.
 
 ### Fixed
 

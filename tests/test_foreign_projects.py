@@ -895,6 +895,99 @@ def test_the_warning_reaches_the_merged_report(django_project):
     assert report["registry_warning"] is None
 
 
+# --- migrations reported as pending that shipped years ago ------------------
+
+
+def _migration_entry(risk="rewrites_table"):
+    return {
+        "app": "shop",
+        "name": "0002_something",
+        "worst_risk": risk,
+        "operations": [
+            {"risk": risk, "detail": "This will rewrite the whole table.",
+             "safer": "Do it in two steps."},
+        ],
+    }
+
+
+def test_a_migration_finding_says_when_applied_could_not_be_told_from_pending():
+    """The largest confident wrong answer this tool had.
+
+    `migration_risk` is about migrations that have not run yet, and it learns
+    which those are by reading `django_migrations`. When that read fails it
+    falls back to an empty applied set, so the entire history is presented as
+    about to run: 255 findings on DefectDojo, 830 on Saleor, and 146 of
+    healthchecks' 234 - **62% of everything the tool said about that
+    project**, every one of which shipped years ago.
+
+    The flag was in the sub-report and the aggregate dropped it.
+    """
+    from django_chainsaw_mcp.check import _from_migrations
+
+    findings = _from_migrations({
+        "database_reachable": False,
+        "migrations": [_migration_entry()],
+    })
+    assert len(findings) == 1
+    assert "may have been applied long ago" in findings[0]["detail"]
+    assert "could not be told apart" in findings[0]["detail"]
+
+
+def test_a_readable_database_leaves_the_finding_alone():
+    # The caveat is only true when it is true. On a project whose database
+    # answers, these really are pending, and a hedge on every one of them
+    # would teach people to skip the sentence.
+    from django_chainsaw_mcp.check import _from_migrations
+
+    findings = _from_migrations({
+        "database_reachable": True,
+        "migrations": [_migration_entry()],
+    })
+    assert "may have been applied" not in findings[0]["detail"]
+    assert findings[0]["detail"].endswith("rewrite the whole table.")
+
+
+def test_a_safe_migration_is_still_not_a_finding():
+    from django_chainsaw_mcp.check import _from_migrations
+
+    assert _from_migrations({
+        "database_reachable": False,
+        "migrations": [_migration_entry(risk="safe")],
+    }) == []
+
+
+def test_the_check_itself_says_it_in_the_note(django_project, monkeypatch):
+    """Fail the read the way a missing database fails it.
+
+    Patching `connections` does not work: the loader reaches it through
+    `__getitem__`, and Python looks dunders up on the type rather than the
+    instance. The loader is what actually raises, so that is what is broken
+    here - and only when handed a connection, because the fallback path
+    constructs it with None and has to keep working.
+    """
+    from django.db.migrations import loader as loader_module
+
+    from django_chainsaw_mcp.migrations import migration_risk
+
+    # The demo project's SQLite database is readable, so the note stays quiet.
+    assert "django_migrations is unknown" not in migration_risk()["note"]
+
+    real = loader_module.MigrationLoader
+
+    def refuse(connection, *args, **kwargs):
+        if connection is not None:
+            raise RuntimeError("could not read django_migrations")
+        return real(None, *args, **kwargs)
+
+    monkeypatch.setattr(loader_module, "MigrationLoader", refuse)
+    report = migration_risk()
+    assert report["database_reachable"] is False
+    assert "django_migrations is unknown" in report["note"]
+    assert "as though it were about to run" in report["note"]
+    # And the whole history is now in there, which is the point of saying so.
+    assert report["migration_count"] > 0
+
+
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
     from django_chainsaw_mcp.tenancy import find_unscoped_queries
 
