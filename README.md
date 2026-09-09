@@ -1,161 +1,62 @@
 # django-chainsaw-mcp
 
-![release](https://img.shields.io/badge/release-v0.1.4-1f6feb?style=for-the-badge)
-![checks](https://img.shields.io/badge/checks-22-2ea043?style=for-the-badge)
-![MCP tools](https://img.shields.io/badge/MCP%20tools-37-8250df?style=for-the-badge)
-![CLI commands](https://img.shields.io/badge/CLI%20commands-36-6e7681?style=for-the-badge)
-![prompts](https://img.shields.io/badge/prompts-5-8250df?style=for-the-badge)
+![release](https://img.shields.io/badge/release-v0.1.4-1f6feb?style=for-the-badge&labelColor=22272e)
+![checks](https://img.shields.io/badge/checks-22-8957e5?style=for-the-badge&labelColor=22272e)
+![MCP tools](https://img.shields.io/badge/MCP%20tools-37-8957e5?style=for-the-badge&labelColor=22272e)
+![CLI commands](https://img.shields.io/badge/CLI%20commands-36-8957e5?style=for-the-badge&labelColor=22272e)
+![prompts](https://img.shields.io/badge/prompts-5-8957e5?style=for-the-badge&labelColor=22272e)
 
-![tests](https://img.shields.io/badge/tests-440-2ea043?style=for-the-badge)
-![coverage](https://img.shields.io/badge/coverage-86%25-2ea043?style=for-the-badge)
-![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-f1c40f?style=for-the-badge&logo=python&logoColor=white)
-![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-0C4B33?style=for-the-badge&logo=django&logoColor=white)
-![license](https://img.shields.io/badge/license-MIT-6e7681?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-440-238636?style=for-the-badge&labelColor=22272e)
+![coverage](https://img.shields.io/badge/coverage-86%25-238636?style=for-the-badge&labelColor=22272e)
+![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-484f58?style=for-the-badge&labelColor=22272e&logo=python&logoColor=white)
+![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-484f58?style=for-the-badge&labelColor=22272e&logo=django&logoColor=white)
+![license](https://img.shields.io/badge/license-MIT-484f58?style=for-the-badge&labelColor=22272e)
 
+**An MCP server and CLI that analyses a Django project rather than describing
+it.** Not *what is in here* — *what will hurt*: what a delete takes with it,
+which migration breaks the pods still running, which query returns another
+tenant's row, what a `save()` sets off three hops away.
 
-An MCP server and CLI that **analyses** a Django project rather than
-describing it. A handful of the checks reach past Django — one needs nothing
-but Python, one reads FastAPI routes, one reads SQLAlchemy — and the rest read
-the app registry.
+There is **no model in the loop**. Every answer comes from the AST and Django's
+own app registry, so the same input gives the same output, and nothing leaves
+the machine. It is an MCP server so an assistant can ask it questions, and a CLI
+so CI can gate on the answers.
+
+22 checks: 19 need the app registry (16 Django, three of those DRF as well), one
+needs only Python, one reads FastAPI, one reads SQLAlchemy.
+**[Why this exists →](docs/why.md)**
 
 ## Install
 
 **It has to run in an interpreter that can import your project.** Everything
 here reads the app registry, which means `django.setup()`, your settings and
-your apps. So install it into the environment your project already uses:
+your apps:
 
 ```bash
 /path/to/project/.venv/bin/python -m pip install django-chainsaw-mcp
-# or, with uv
-uv pip install --python /path/to/project/.venv/bin/python django-chainsaw-mcp
 ```
 
-A plain `uvx django-chainsaw-mcp` will start and then fail every check, because
-`uvx` gives it an isolated environment with no trace of your project. If you
-would rather not install anything, hand `uv` the dependencies instead:
+A plain `uvx django-chainsaw-mcp` starts and then fails every check, because
+`uvx` gives it an isolated environment with no trace of your project. To avoid
+installing, hand `uv` the dependencies instead:
 
 ```bash
 uvx --with-requirements requirements.txt --from django-chainsaw-mcp django-chainsaw check
 ```
 
-It needs two environment variables - the project to read and the settings
-module to read it through - and `docs/clients.md` has the config block for
-Claude Code, Claude Desktop, VS Code and Cursor, each pointing at the
-project's own interpreter. `django-chainsaw project-info` is the one command
-that proves the setup before anything else, and it says which half is
-missing.
+Two environment variables point it at the project:
 
-The server is listed in the MCP registry, which reads `server.json` from this
-repository; a documentation gate keeps that manifest's version and environment
-variables matching the code. The registry checks that the PyPI package belongs
-to the same person, and the line below is the proof it looks for:
+| Variable | Example |
+| --- | --- |
+| `DJANGO_CHAINSAW_PROJECT_PATH` | `/srv/app` — the directory settings are importable **from** |
+| `DJANGO_CHAINSAW_SETTINGS_MODULE` | `myproject.settings` |
+
+`django-chainsaw project-info` proves the setup before anything else, and says
+which half is missing. **[Five minutes end to end →](docs/quickstart.md)**
 
 mcp-name: io.github.syrian963/django-chainsaw-mcp
 
-## Why this exists
-
-I work on a large Django codebase, and the questions that cost real time are
-never *what is in this project*. They are: if I delete this customer, what else
-goes with it? Is this migration safe to deploy while the old pods are still
-running? Which of these three hundred findings can a request actually reach?
-
-Every tool I could point at that codebase answered the first kind of question.
-I would still be reading through `models.py` by hand to answer the second kind,
-and so was everyone else. So I wrote something that answers the second kind,
-and kept it honest by pointing it at other people's code.
-
-Eighteen public Django projects, from channels at 55 files to Saleor at 4332.
-They found **twelve defects in this tool** that neither its own fixtures nor a
-single private codebase had shown - a virtualenv inside a project directory
-making every installed package look like a project app, a decorator that meant
-the exact opposite of what a check assumed, a check that presented a project's
-entire migration history as unshipped. Each one is in the changelog with the
-measurement that found it. `docs/tested-against.md` has the whole list,
-including the two checks that have **never** fired on real code and the number
-of things they examined before finding nothing.
-
-That is the part worth judging this on. Writing a check is easy; knowing
-whether it is right, and saying so when you cannot tell, is the work.
-
-Several Django MCP servers already exist. They answer *what exists*: list the
-models, dump the schema, run the ORM, read the settings. None of the ones I
-looked at answer *what will hurt*:
-
-- what a delete actually takes with it,
-- where the N+1 queries are,
-- which pending migration stops writes or breaks the code that is still running
-  during a rolling deploy,
-- whether a destructive migration is safe to ship **yet**,
-- which queries read tenant-scoped rows without scoping the query,
-- what a single `save()` actually sets off, three hops away,
-- which endpoint a stranger can use to make the database do three thousand
-  queries,
-- which of three hundred findings a request can actually reach, and through
-  which endpoint,
-- which `filter(status="cancelled")` the `choices` will never match, returning
-  zero rows and raising nothing,
-- which `reverse()` call, template, signal receiver or scheduled task points at
-  a name that no longer exists,
-- which dashboard number is the product of two joins rather than the count it
-  claims to be.
-
-Everything is read-only, and most of it never touches the database.
-
-**On the name.** It is a Django tool, and the name is not a historical
-accident to apologise for: of the 22 checks in the aggregate run, **19 need the
-app registry** — 16 of them need Django itself and three more need Django REST
-Framework on top. One needs only Python, one is FastAPI-specific and one is for
-SQLAlchemy. The reach beyond Django is real and it is small, which is what the
-two tables below say.
-
-An earlier version of this paragraph claimed the name stays because renaming
-the repository would break every link to it. That is not true — GitHub
-permanently redirects a renamed repository — and it was the wrong reason for
-the right conclusion. The name stays because it is accurate.
-
-## Or as one HTML file
-
-```bash
-django-chainsaw report --out findings.html --title myproject
-```
-
-Every finding in a single self-contained page: filter by severity, search, and
-group by **endpoint**, check, file or severity.
-
-![The HTML report, grouped by endpoint](docs/assets/report.png)
-
-Grouped by endpoint is the view that matters: *which pages carry this, and
-through what call path*. No server, no network, no build step - the CSS, the
-script and the data are all in the file, so it works from a CI artifact or an
-email attachment. Details: **[docs/report.md](docs/report.md)**.
-
-## What it runs, and what it does not
-
-Read this before pointing it at a codebase.
-
-**It imports the target project.** `django.setup()` imports your settings and
-every app in `INSTALLED_APPS`, and the checks additionally import the modules
-that declare serializers, views and URLs. Anything those modules do at import
-time therefore happens: a module-level API call happens, a connection opened in
-`apps.py` is opened. That is not a design choice this can avoid - the app
-registry is where the answers are - but it does mean **do not point this at code
-you would not run**.
-
-**It does not run your application.** No view is called, no task is dispatched,
-no management command is executed.
-
-**One check reads the database, read-only.** `migrations` and `deploy-safety`
-ask Django's own `MigrationLoader` which migrations are applied, which reads the
-`django_migrations` table. Nothing else opens a connection, and nothing writes
-to your database. No migration is applied and no row is touched.
-
-**It writes files only when you ask.** `fix --write` edits your source, and only
-the mechanical class of fix. A baseline, an API-contract snapshot and `--sarif`
-each write where you tell them to. Otherwise nothing is written.
-
-**Nothing leaves the machine.** No network calls, no telemetry, no uploads.
-
-## One command to try it
+## One command
 
 ```bash
 django-chainsaw check --tenant-root myapp.Organisation
@@ -174,25 +75,66 @@ CRITICAL
            then ship this migration.
 ```
 
-Every analysis, merged, worst first, one exit code. `--sarif out.json` writes
-the same findings in the format GitHub and GitLab annotate a pull request with,
-so they land **on the line** instead of in a log nobody opens.
+Every analysis, merged, worst first, one exit code.
 
-Five minutes end to end: **[docs/quickstart.md](docs/quickstart.md)**.
+## On a pull request
 
-## Two front ends, one analysis layer
+This is the part that decides whether a tool like this survives. Point `tenancy`
+at a five year old project and it returns two hundred candidates; nobody reads
+two hundred candidates, somebody adds `continue-on-error`, and it runs forever
+with nobody looking.
 
-| | For |
-| --- | --- |
-| **MCP server** | asking questions while working, from Claude Code or any MCP client |
-| **`django-chainsaw` CLI** | the same checks with an exit code, so CI can gate on them |
+```bash
+django-chainsaw tenancy --since main     # only what this branch changed
+django-chainsaw tenancy --baseline       # everything old, ratcheted
+django-chainsaw check --sarif out.json   # annotate the diff, on the line
+```
 
-## Tools
+`--since` compares at the **merge base**, so a branch that is behind main is not
+blamed for other people's work. `--baseline` keeps existing findings in the
+report and stops them blocking; anything new fails the build, and fixing an old
+one is reported so the number only ever goes down. Findings are fingerprinted on
+file plus identity, never the line, so adding an import does not resurrect
+twenty findings nobody touched.
 
-### Django projects
+`--sarif` writes the format GitHub and GitLab annotate a pull request with, so
+findings land **on the line** instead of in a log nobody opens.
 
-These read the app registry, so they need `DJANGO_CHAINSAW_SETTINGS_MODULE` as
-well as the project path.
+**[baseline.md](docs/baseline.md)** · **[cli.md](docs/cli.md)**
+
+## As an MCP server
+
+```bash
+claude mcp add django-chainsaw --scope local \
+  --env DJANGO_CHAINSAW_PROJECT_PATH=/srv/app \
+  --env DJANGO_CHAINSAW_SETTINGS_MODULE=myproject.settings \
+  -- /srv/app/.venv/bin/python -m django_chainsaw_mcp.server
+```
+
+Ask it `project_info` first: the smallest call that proves both the transport
+and the Django boot. Five prompts carry the ordering the tools do not —
+`before_deploy`, `why_is_this_slow`, `what_breaks_if_i_delete`, `triage`,
+`review_this_branch`.
+
+**[Claude Desktop, Cursor, VS Code, Windsurf, Zed, Docker →](docs/clients.md)**
+
+## Or as one HTML file
+
+```bash
+django-chainsaw report --out findings.html --title myproject
+```
+
+![The HTML report, grouped by endpoint](docs/assets/report.png)
+
+Grouped by **endpoint** is the view that matters: which pages carry this, and
+through what call path. No server, no network, no build step — the CSS, the
+script and the data are all in the file, so it works from a CI artifact or an
+email attachment. **[report.md](docs/report.md)**
+
+## The checks
+
+<details>
+<summary><b>Django projects</b> — these read the app registry, so they need <code>DJANGO_CHAINSAW_SETTINGS_MODULE</code> as well as the project path</summary>
 
 | Tool | Answers |
 | --- | --- |
@@ -228,10 +170,10 @@ well as the project path.
 | `check` | Run everything that applies, one severity-sorted list, one exit code. |
 | `suggest_fixes` | **Findings turned into code, grouped by how safe each one is to apply.** |
 
-### Any Python project
+</details>
 
-These need no Django, and no settings module — point
-`DJANGO_CHAINSAW_PROJECT_PATH` at the directory and go:
+<details>
+<summary><b>Any Python project</b> — no Django, no settings module</summary>
 
 | Tool | Answers |
 | --- | --- |
@@ -241,256 +183,24 @@ These need no Django, and no settings module — point
 | `sqlalchemy_nplusone` | Relationships loaded one row at a time, including during serialisation. |
 | `amplification` | **Which endpoint can a stranger use to exhaust the database?** |
 
-Plus the resource `django://models`. Stable addressable data belongs in a
-resource; actions belong in tools.
+Plus the resource `django://models`. `check` profiles the project first and runs
+what applies, and says **"does not apply, and here is why"** for the rest —
+silence would read exactly like a clean result. Nothing about the FastAPI
+support imports the project, so those checks run on a checkout with no
+dependencies installed at all.
 
-### The parts of the MCP surface that are not tools
+</details>
 
-**Every tool declares that it reads.** 35 of the 36 carry
-`readOnlyHint`, so a client can stop asking permission for each call. The one
-exception is `api_contract_check` with `update=True`, which writes the
-snapshot and says so.
+36 of the 37 tools declare `readOnlyHint`, so a client can stop asking
+permission for each call; the exception is `api_contract_check` with
+`update=True`, which writes the snapshot and says so.
+**[Every tool, argument and output shape →](docs/tools.md)**
 
-**Five prompts carry the order the tools do not.** A tool answers one
-question; knowing which three to ask, in which order, and what the answer does
-*not* mean is a workflow:
-
-| Prompt | For |
-| --- | --- |
-| `before_deploy` | the migration and rolling-deploy questions, in the order they matter |
-| `why_is_this_slow` | trace one endpoint's cost from queryset to serialiser |
-| `what_breaks_if_i_delete` | cascades, signals, and the code that still refers to it |
-| `triage` | turn a long findings list into the few endpoints that carry it |
-| `review_this_branch` | only what changed against a ref, with the caveats intact |
-
-**Model arguments complete.** A real project has hundreds of models; typing
-one from memory is how you get a `LookupError`, and a wrong label looks
-exactly like a model with nothing attached to it.
-
-**The server ships instructions.** An assistant handed 36 tools with no
-ordering picks by name, and the names do not say which question each answers.
-
-**`check` reports progress, and says which check it is on.** It is the one
-slow call here - a minute or more on a large project - and the twenty-one
-checks are not equal in cost. A bare spinner for a minute is indistinguishable
-from a hung server; `deploy-safety (1 of 21)` is not.
-
-**`check` declares its output shape.** One schema, not thirty-six: its
-envelope is already a contract, and the SDK validates the return against it,
-so a key renamed in the code fails on the next run instead of quietly
-vanishing from whatever was reading it.
-
-Full reference: [`docs/tools.md`](docs/tools.md).
-
-## Contributing, and the bar a new check has to clear
-
-`CONTRIBUTING.md` has the workflow. The part worth knowing before you start:
-
-Every check in here documents **what it cannot see**, in its own output and on
-its own page, and every suppression carries the reason next to it. That is not
-politeness - it is the difference between a tool somebody trusts and one they
-learn to ignore. Two finished features were deleted from this repository after
-measurement showed they could not tell a real finding from a correct one.
-
-So a proposal for a new check answers four questions, which the
-[issue template](.github/ISSUE_TEMPLATE/new_check.yml) asks directly: what the
-defect looks like as code, how it fails in production, what already finds it,
-and what it must stay silent on.
-
-| | |
-| --- | --- |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | workflow, house style, how to run the suites |
-| [`SECURITY.md`](SECURITY.md) | what this does to the code you point it at, and how to report a vulnerability |
-| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | be straight with people and be kind about it |
-| [`CHANGELOG.md`](CHANGELOG.md) | every release, and the reasoning behind the changes |
-
-## Beyond Django
-
-`check` profiles the project first and runs what applies, so the same command
-works either way:
-
-```bash
-DJANGO_CHAINSAW_PROJECT_PATH=/path/to/api django-chainsaw check
-```
-
-```
-15 finding(s): 8 critical, 7 high
-Ran 3 check(s): async, routes, sqla
-
-Frameworks found: sqlalchemy, requests, fastapi, httpx, pydantic
-13 check(s) do not apply to this project:
-    bypass           no Django in this project
-    datetimes        no Django in this project
-    ...
-```
-
-Saying **"does not apply, and here is why"** is the point. Silence would read
-exactly like a clean result.
-
-Nothing about the FastAPI support imports the project. An app that wants a
-database URL and a secret before it will import is not an app this can boot,
-and none of that is needed to read a decorator — so those checks run on a
-checkout with no dependencies installed at all.
-
-## The one worth reading about
-
-`django-migration-linter` says `RemoveField` is backward incompatible. Always.
-Repeated often enough that stops being read.
-
-`deploy_safety` asks the question that actually decides the deploy: **has the
-code caught up yet?**
-
-```
-BLOCKING shop.0002_remove_product_legacy_code  RemoveField 'legacy_code'
-     shop/services.py:17  [string field name]  values("id", "sku", "legacy_code")
-     shop/services.py:22  [keyword argument]   filter(legacy_code__startswith=code)
-     shop/services.py:27  [attribute access]   f"{product.sku} / {product.legacy_code}"
-     shop/services.py:32  [keyword argument]   Product(sku=sku, legacy_code="")
-```
-
-and the other verdict, which is the point:
-
-```
-CLEAR    shop.0002_remove_product_legacy_code  RemoveField 'legacy_code'
-         no remaining reference found outside migrations
-```
-
-Python is parsed with the AST, so comments and docstrings cannot produce a hit.
-Why and how: [`docs/deploy-safety.md`](docs/deploy-safety.md).
-
-## The second one worth reading about
-
-```python
-def order_detail(request, pk):
-    return Order.objects.get(pk=pk)
-```
-
-Nothing is wrong with that line, and it is how most IDOR reports start. This
-class of bug is hard for static analysis because **the defect is the absence of
-a filter, and absence has no syntax**: there is no dangerous call to match on.
-The tools that work today are runtime or architectural.
-
-The model graph makes it checkable. A generic analyser does not know whether
-`Order` belongs to anybody; this one knows it reaches the tenant root through
-`customer`, so it can say that filtering on `pk` alone is not enough:
-
-```
-high    shop/api.py:14   Order.objects.get(pk=pk)
-        shop.Order is owned via 'customer', filtered on ['pk']
-        add: .filter(customer=<the request user>)
-```
-
-Models with no path to the owner, like the product catalogue, are never
-reported. Details and the blind spots: [`docs/tenancy.md`](docs/tenancy.md).
-
-## And the third: what a save really does
-
-```python
-line.save()
-```
-
-That queues a Celery task. Nothing about the line says so, because the task is
-three hops away:
-
-```
-OrderLine.save()
-  post_save  touch_order                writes instance.order -> shop.Order
-    post_save  create_invoice_for_order  writes Invoice.create() -> shop.Invoice
-      post_save  announce_invoice        cache write: set()
-                                         celery task: delay()
-```
-
-Tools that **list** signal receivers exist and are good. None of them follow the
-chain, and the second hop is where the surprise lives. Resolving
-`instance.order` needs the model graph, which is why it fits here.
-
-This is also the other half of `delete_impact`, which walks `on_delete` and says
-in its own output that it ignores signals. Details:
-[`docs/signals.md`](docs/signals.md).
-
-## Making it survive a real codebase
-
-Point `tenancy` at a five year old project and it returns two hundred
-candidates. Nobody reads two hundred candidates: the gate goes in, the build
-turns red, somebody adds `continue-on-error`, and the tool runs forever with
-nobody looking. That is the same failure mode this project criticises migration
-linters for.
-
-So `tenancy`, `n+1` and `deploy-safety` support a baseline:
-
-```bash
-django-chainsaw tenancy --baseline --update-baseline   # once, record today
-django-chainsaw tenancy --baseline                     # from then on, in CI
-```
-
-The existing findings stay in the report and stop blocking. Anything **new**
-fails the build. Fixing an old one is reported so the file can be regenerated,
-which means the number only ever goes down.
-
-Findings are fingerprinted on file plus identity, never the line, so adding an
-import does not resurrect twenty findings nobody touched.
-[`docs/baseline.md`](docs/baseline.md).
-
-For a pull request there is a lighter ratchet that needs no committed file:
-
-```bash
-django-chainsaw tenancy --since main
-```
-
-Only findings in files the branch changed, compared at the **merge base** so a
-branch that is behind main is not blamed for other people's work.
-
-## Quick start
-
-Install it **into your project's virtualenv**. The server calls
-`django.setup()`, which imports your settings and everything in
-`INSTALLED_APPS`, so the interpreter running it needs your project's
-dependencies:
-
-```bash
-# inside your project's venv
-pip install -e /path/to/django-chainsaw-mcp
-```
-
-Point it at the project with two environment variables:
-
-| Variable | Example |
-| --- | --- |
-| `DJANGO_CHAINSAW_PROJECT_PATH` | `/srv/app` (the directory settings are importable **from**) |
-| `DJANGO_CHAINSAW_SETTINGS_MODULE` | `myproject.settings` |
-
-### As a CLI
-
-```bash
-django-chainsaw deploy-safety          # exit 1 if a migration is unsafe
-django-chainsaw tenancy --since main   # only what this branch introduced
-django-chainsaw n+1 --max-high 12      # exit 1 above the budget
-django-chainsaw delete-impact shop.Customer
-django-chainsaw --json models | jq .
-```
-
-Exit codes and a CI workflow: [`docs/cli.md`](docs/cli.md).
-
-### As an MCP server
-
-```bash
-claude mcp add django-chainsaw --scope local \
-  --env DJANGO_CHAINSAW_PROJECT_PATH=/srv/app \
-  --env DJANGO_CHAINSAW_SETTINGS_MODULE=myproject.settings \
-  -- /srv/app/.venv/bin/python -m django_chainsaw_mcp.server
-```
-
-Then ask it `project_info` first: it is the smallest call that proves both the
-transport and the Django boot.
-
-**Separate environment, Docker, Claude Desktop, other clients, and what the
-error messages mean:** [`docs/usage.md`](docs/usage.md).
-
-## What the analysis does not know
+## What it will not tell you
 
 Nothing here executes the target project or reads its data, which buys safety
-and speed and costs certainty. Every tool states its own blind spots in its
-output rather than hiding them:
+and speed and costs certainty. Every tool states its own blind spots in its own
+output:
 
 - `delete_impact` does not run signals or custom `delete()` overrides.
 - `find_n_plus_one` reports **candidates**; it reads the template and the model
@@ -498,118 +208,63 @@ output rather than hiding them:
 - `migration_risk` does not know row counts, PostgreSQL version, or deploy
   strategy.
 - `deploy_safety` cannot see `getattr(obj, name)`, runtime SQL, or another
-  repository. `clear` means nothing was found here.
+  repository. `CLEAR` means nothing was found **here**.
 
 **A confident wrong answer is worse than an incomplete one.** In this kind of
 tooling the failure mode is not a crash, it is a plausible sentence that sends
-someone in the wrong direction.
+someone in the wrong direction. **[limitations.md](docs/limitations.md)**
 
-## Suggestions that are actual code
+## What it does to your code
 
-A report ending in *add an ownership filter* has done the easy half. The
-interesting question is which fixes a machine can write correctly, and the
-answer is not the same for every check:
+**It imports the target project.** `django.setup()` imports your settings and
+every app in `INSTALLED_APPS`, and the checks additionally import the modules
+that declare serializers, views and URLs — so anything those do at import time
+happens. **Do not point this at code you would not run.**
 
-| Class | Meaning | Applied automatically? |
-| --- | --- | --- |
-| **mechanical** | one correct answer from the code alone | **yes**, with `--write` |
-| **generated** | a machine writes it, a human decides if it should exist | no, written to a file to review |
-| **advisory** | real code, but the decision is about your domain | **never** |
+**It does not run your application**: no view, no task, no management command.
+**One check reads the database, read-only** — `MigrationLoader` reads
+`django_migrations`, and nothing is written.
+**It writes files only when you ask**: `fix --write` applies the mechanical
+class of fix only, and a baseline, a contract snapshot or `--sarif` write where
+you tell them to. **Nothing leaves the machine** — no network calls, no
+telemetry, no uploads.
 
-```diff
-  MECHANICAL
-- return Order.objects.filter(placed_at__gte=datetime.datetime.now())
-+ return Order.objects.filter(placed_at__gte=timezone.now())
-
-  ADVISORY
-- return Order.objects.get(pk=pk)
-+ return Order.objects.filter(customer=request.user).get(pk=pk)
-```
-
-**`request` is read from the enclosing function's signature, not assumed**, and
-when there is no request argument the tool says so rather than inventing one. It
-also names its own limit: whether `customer` points at a user, a profile or an
-organisation is a question about the domain, not the syntax.
-
-`--write` applies the mechanical class only, refuses any fix whose line changed
-since the analysis, and is idempotent. All four properties are covered by
-`fix_check.sh`. Details: [`docs/fixes.md`](docs/fixes.md).
-
-## Correlated risks
-
-The part no single check can produce. Three separate warnings, each ordinary on
-its own:
-
-```
-[CRITICAL] A full path from a URL to another owner's row
-    shop.Invoice belongs to an owner through 'order__customer'.
-    2 queryset(s) read it without scoping, and 1 serializer(s) return it
-    over the API.
-    seen by: find_unscoped_queries, serializer_exposure
-```
-
-`explain_model` runs every analysis for one model and looks for the overlaps:
-a cascade that crosses into a different owner's subtree, a save that reaches
-external systems several hops away, a sensitive field on owned data exposed by
-a wildcard serializer. Correlation is hard to get anywhere else because it needs
-all the analyses in one process over one model graph.
+**[SECURITY.md](SECURITY.md)**
 
 ## Documentation
 
-**[docs/](docs/README.md) is the index.** The pages worth knowing about:
+**[docs/](docs/README.md) is the index.**
 
 | | |
 | --- | --- |
-| [`docs/quickstart.md`](docs/quickstart.md) | **five minutes from clone to first finding** |
-| [`docs/usage.md`](docs/usage.md) | : installing against a real project, clients, Docker, troubleshooting |
-| [`docs/architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
-| [`docs/tools.md`](docs/tools.md) | every tool, argument and output shape |
-| [`docs/deploy-safety.md`](docs/deploy-safety.md) | the rolling-deploy problem and how references are found |
-| [`docs/tenancy.md`](docs/tenancy.md) | the IDOR shape, and why the model graph makes it checkable |
-| [`docs/signals.md`](docs/signals.md) | tracing the signal chain, and the other half of `delete_impact` |
-| [`docs/indexes.md`](docs/indexes.md) | static index gaps, and why an index is not free |
-| [`docs/datetimes-and-serializers.md`](docs/datetimes-and-serializers.md) | two defects that are correct today and wrong later |
-| [`docs/clients.md`](docs/clients.md) | Claude Code, Cursor, VS Code, Windsurf, Zed, Docker |
-| [`docs/cli.md`](docs/cli.md) | commands, exit codes, CI |
-| [`docs/fixes.md`](docs/fixes.md) | suggestions as real code, and which ones can be applied |
-| [`docs/baseline.md`](docs/baseline.md) | ratcheting, so these tools survive contact with a legacy codebase |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | setup, tests, how to add a tool |
-| [`CHANGELOG.md`](CHANGELOG.md) | including every bug and what it looked like |
+| [`why.md`](docs/why.md) | why this exists, three checks worth reading about, and the bar a new one clears |
+| [`quickstart.md`](docs/quickstart.md) | five minutes from clone to first finding |
+| [`usage.md`](docs/usage.md) | installing against a real project, Docker, troubleshooting |
+| [`clients.md`](docs/clients.md) | Claude Code, Cursor, VS Code, Windsurf, Zed |
+| [`cli.md`](docs/cli.md) | commands, exit codes, CI |
+| [`tools.md`](docs/tools.md) | every tool, argument and output shape |
+| [`tested-against.md`](docs/tested-against.md) | eighteen public projects, what they found in this tool, and the checks that never fired |
+| [`limitations.md`](docs/limitations.md) | what the analysis cannot see |
+| [`baseline.md`](docs/baseline.md) | ratcheting, so this survives a legacy codebase |
+| [`fixes.md`](docs/fixes.md) | suggestions as real code, and which can be applied |
+| [`architecture.md`](docs/architecture.md) | how it is put together, and why the bootstrap drives the design |
+| [`performance.md`](docs/performance.md) | where the time goes on a large project |
 
-## Development
+## Contributing
 
-```bash
-uv run pytest                    # the analysis layer, 26 tests
-uv run python smoke_test.py      # introspection, called directly
-uv run python analysis_test.py   # the analysis tools, with assertions
-uv run python client_test.py     # the server over the real MCP transport
-bash exitcheck.sh                # CLI exit codes
-```
+| | |
+| --- | --- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | workflow, house style, how to run the suites |
+| [`CHANGELOG.md`](CHANGELOG.md) | every release, and the reasoning behind the changes |
+| [`SECURITY.md`](SECURITY.md) | what this does to the code you point it at |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | be straight with people and be kind about it |
 
-`client_test.py` is the one that counts: it starts the server as a separate
-process and speaks stdio to it. The others prove nothing about the protocol.
+A proposal for a new check answers four questions, which the
+[issue template](.github/ISSUE_TEMPLATE/new_check.yml) asks directly: what the
+defect looks like as code, how it fails in production, what already finds it,
+and what it must stay silent on. Two finished features were deleted from this
+repository after measurement showed they could not tell a real finding from a
+correct one.
 
-`testprojects/` is a throwaway Django project shaped to expose bugs: a
-self-referencing FK, a `PROTECT` relation, a nested-loop template, and a
-migration that removes a field four other places still use.
-
-## One process, one project
-
-`django.setup()` mutates global state and cannot be undone, so a server instance
-stays bound to the first project it loads and says so when asked to switch. Run
-a second instance for a second project.
-
-## Six bugs, all of which ran without raising
-
-Kept in [`CHANGELOG.md`](CHANGELOG.md) rather than tidied away. Static analysis
-fails by being confidently wrong, not by crashing, and every one of these
-produced perfectly reasonable-looking output:
-
-1. Reverse relations lost their cardinality: the `one_to_many` case was missing.
-2. `delete_impact` returned nothing: `on_delete` is on `field.remote_field`.
-3. Nested loops were invisible: loop variables were bound to strings, not models.
-4. `deploy_safety` matched docstrings and every `name` in the project.
-5. Narrowing the scan emptied the analysis instead of flipping the verdict.
-6. The package imported `server` eagerly and warned under `python -m`.
-
-Each has an assertion that fails without the fix.
+MIT. One process stays bound to the first project it loads, because
+`django.setup()` cannot be undone — run a second instance for a second project.
