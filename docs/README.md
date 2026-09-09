@@ -6,6 +6,7 @@ Start at the row that matches what you are trying to do.
 
 | | |
 | --- | --- |
+| [Why this exists](why.md) | the questions it was written for, three checks worth reading about, and the bar a new one clears |
 | **[Quickstart](quickstart.md)** | five minutes from clone to first finding |
 | [Installing against a real project](usage.md) | the environment constraint that decides everything, Docker, troubleshooting |
 | [Wiring it into an AI tool](clients.md) | Claude Code, Cursor, VS Code, Windsurf, Zed |
