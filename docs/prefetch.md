@@ -42,14 +42,22 @@ each, counting queries with `CaptureQueriesContext`:
 | `order.lines.select_related(...)` | 12 | no |
 
 `.count()` and `.exists()` being in the first group is the part that is worth
-knowing and is not obvious. Since Django 4.1 the related manager answers both
-from the prefetched result, so rewriting `order.lines.count()` as
+knowing and is not obvious. The related manager answers both from the
+prefetched result, so rewriting `order.lines.count()` as
 `len(order.lines.all())` changes nothing. They are not reported, because a
 finding whose fix is a no-op is how a check earns the reputation of being
 noise.
 
-Everything in the second group re-queries on every Django version, so a
-finding here does not depend on which one the project runs.
+The same table was measured on Django 4.2, the oldest version this supports,
+and comes out identical: `.count()` and `.exists()` served from the cache,
+`.filter()` at one query per parent. So a finding here does not depend on
+which version the project runs.
+
+An earlier version of this page said `.count()` and `.exists()` had been
+cache-served "since Django 4.1". That was an attribution nobody had checked —
+the 4.1 release notes do not mention it. The behaviour is real on every
+version this supports; the version it landed in is not something this page
+knows.
 
 ## How it decides two things are the same object
 
