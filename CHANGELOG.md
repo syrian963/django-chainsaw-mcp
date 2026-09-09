@@ -3,6 +3,61 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`defeated_prefetches`**: a relation that was prefetched and then re-queried
+  anyway. `prefetch_related` fills a cache on each parent object, and the
+  related manager hands it back only to the accessors that can read it. Ask it
+  anything else and it goes to the database once per parent, with the prefetch
+  query already paid for on top - so the loop costs more than it would have
+  with no prefetch at all, while reading like an optimisation.
+
+  Which accessors, measured rather than assumed: ten parents with three
+  children each, queries counted with `CaptureQueriesContext` on Django 6.1.
+  `.filter()`, `.exclude()`, `.order_by()`, `.first()`, `.last()`, `.only()`,
+  `.defer()`, `.values()`, `.values_list()`, `.distinct()`,
+  `.select_related()`, `.annotate()` and `.reverse()` each cost 12 queries
+  where the cache costs 2. `.count()`, `.exists()`, `.all()` and a slice cost
+  2 - the related manager has answered `count` and `exists` from the prefetch
+  since Django 4.1, which is not obvious, and reporting them would be a
+  finding whose fix changes nothing. Only the first group is reported, and
+  every method in it re-queries on earlier Django versions too.
+
+  Reported only where the prefetch and the accessor are provably the same
+  object: a name bound in the same scope, or the loop variable iterating one.
+  That boundary was measured too. Matching on the relation name anywhere in
+  the same file found 79 sites across nine large projects; five were read by
+  hand and four of the five were coincidence - the same relation name,
+  unrelated objects. The scope-local rule finds 7 in the same nine projects,
+  and all 7 were read and confirmed: Wagtail, Saleor (four, one of them under
+  a comment that says "get cached variant with related fields"), pretix and
+  DefectDojo. A prefetch in a view and the accessor in a template tag is the
+  same defect and is not reported, because the fix is to delete or rewrite a
+  line and a guess is not a good enough reason to suggest that.
+
+  `nplusone` finds the neighbouring problem - eagerly loaded and never touched
+  - at runtime, and `unused_eager_loading` here answers that one statically
+  for DRF viewsets. Neither answers this one, where the prefetch *is* used and
+  the accessor cannot read it.
+
+### Fixed
+
+- **The check found the same relation name in a different function and called
+  it one object.** The first version walked the module body into the functions
+  it contained, so a name bound in one function matched an accessor in
+  another. Saleor has exactly that pair a hundred lines apart, and it was
+  reported as a finding. Each function is now scanned as a scope of its own.
+  The cost is a name a nested function closes over, which is the right trade:
+  a missed finding costs less than a confident wrong one.
+
+- **Three of its own tests asserted on line numbers that were off by one or
+  two**, so they passed without ever reaching the code they were written to
+  guard. Found by reverting each guard in turn and watching which tests failed
+  - two did not. The tests now key on the enclosing function name instead, and
+  all five go red when their guard is removed.
+
 ## [0.1.3] - 2026-09-09
 
 ### Changed

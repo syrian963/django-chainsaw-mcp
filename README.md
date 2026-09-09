@@ -1,13 +1,13 @@
 # django-chainsaw-mcp
 
 ![release](https://img.shields.io/badge/release-v0.1.3-1f6feb?style=for-the-badge)
-![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
-![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
-![CLI commands](https://img.shields.io/badge/CLI%20commands-35-6e7681?style=for-the-badge)
+![checks](https://img.shields.io/badge/checks-22-2ea043?style=for-the-badge)
+![MCP tools](https://img.shields.io/badge/MCP%20tools-37-8250df?style=for-the-badge)
+![CLI commands](https://img.shields.io/badge/CLI%20commands-36-6e7681?style=for-the-badge)
 ![prompts](https://img.shields.io/badge/prompts-5-8250df?style=for-the-badge)
 
-![tests](https://img.shields.io/badge/tests-426-2ea043?style=for-the-badge)
-![coverage](https://img.shields.io/badge/coverage-87%25-2ea043?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-437-2ea043?style=for-the-badge)
+![coverage](https://img.shields.io/badge/coverage-86%25-2ea043?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-f1c40f?style=for-the-badge&logo=python&logoColor=white)
 ![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-0C4B33?style=for-the-badge&logo=django&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-6e7681?style=for-the-badge)
@@ -102,8 +102,9 @@ looked at answer *what will hurt*:
 Everything is read-only, and most of it never touches the database.
 
 **On the name.** It is a Django tool, and the name is not a historical
-accident to apologise for: of the 21 checks in the aggregate run, **18 need the
-app registry**. One needs only Python, one is FastAPI-specific and one is for
+accident to apologise for: of the 22 checks in the aggregate run, **19 need the
+app registry** — 16 of them need Django itself and three more need Django REST
+Framework on top. One needs only Python, one is FastAPI-specific and one is for
 SQLAlchemy. The reach beyond Django is real and it is small, which is what the
 two tables below say.
 
@@ -217,6 +218,7 @@ well as the project path.
 | `money_precision` | **Where a decimal amount stops being exact.** |
 | `celery_arguments` | **What the worker actually receives**, and whether it can even be called. |
 | `queries_in_loops` | Queries written inside a loop, split by which of three fixes applies. |
+| `defeated_prefetches` | Prefetches paid for and then re-queried by the accessor that reads them. |
 | `request_impact` | Every finding grouped by the entry points that reach it, so the question becomes which endpoint to fix. |
 | `choice_typos` | Literals a field's `choices` will never match: valid SQL, zero rows, no exception. |
 | `multiplied_aggregates` | Counts and sums multiplied by a join across two multi-valued relations. |

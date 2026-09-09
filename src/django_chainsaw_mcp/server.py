@@ -54,6 +54,7 @@ from .money import money_precision as _money_precision
 from .nplusone import analyse_template as _analyse_template
 from .on_commit import escaping_side_effects as _escaping_side_effects
 from .overfetch import unused_eager_loading as _unused_eager_loading
+from .prefetch import defeated_prefetches as _defeated_prefetches
 from .project import get_profile as _get_profile
 from .project import resolve_root as _resolve_root
 from .scan import scan_templates as _scan_templates
@@ -680,6 +681,40 @@ def queries_in_loops(
         _queries_in_loops,
         search_path=search_path,
         include_writes=include_writes,
+    )
+
+
+@mcp.tool(annotations=READS_ONLY)
+def defeated_prefetches(
+    search_path: str | None = None,
+    include_tests: bool = False,
+) -> dict[str, Any]:
+    """Relations that were prefetched and then re-queried anyway.
+
+    A prefetched related manager answers `.count()`, `.exists()`, `.all()` and
+    a slice from its cache. Anything else goes back to the database, once per
+    parent object, with the prefetch query already paid for on top:
+
+        orders = Order.objects.prefetch_related("lines")
+        for order in orders:
+            for line in order.lines.filter(active=True):   # one query per order
+
+    That costs more than never prefetching at all, and it reads like an
+    optimisation, which is why it survives review.
+
+    Reported only where the prefetch and the accessor are provably the same
+    object - bound in the same scope, or the loop variable iterating it.
+    `nplusone` finds the neighbouring problem, an eager load nothing touches,
+    at runtime; `unused_eager_loading` answers that one statically for DRF.
+
+    Args:
+        search_path: directory to scan. Defaults to the configured project.
+        include_tests: also report inside test files.
+    """
+    return _guard(
+        _defeated_prefetches,
+        search_path=search_path,
+        include_tests=include_tests,
     )
 
 

@@ -61,6 +61,7 @@ from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
 from .overfetch import unused_eager_loading
+from .prefetch import defeated_prefetches
 from .report import write_report
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
@@ -1063,6 +1064,41 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_prefetch(args: argparse.Namespace) -> int:
+    """Print the prefetches that were paid for and then re-queried."""
+    report = defeated_prefetches(
+        search_path=args.search_path,
+        include_tests=args.include_tests,
+    )
+    _emit(report, args.json)
+
+    if not args.json:
+        if not report["finding_count"]:
+            print(f"No defeated prefetch in "
+                  f"{report['prefetch_sites_scanned']} prefetch site(s) across "
+                  f"{report['files_scanned']} file(s).")
+        else:
+            print(f"{report['finding_count']} prefetch(es) paid for and then "
+                  f"re-queried, of {report['prefetch_sites_scanned']} "
+                  f"prefetch site(s):")
+            print()
+            for f in report["findings"]:
+                print(f"  {f['severity'].upper():<9} {f['file']}:{f['line']}  "
+                      f"{f['call']}")
+                print(f"      {f['why']}")
+                print(f"      fix: {f['fix']}")
+                print()
+            print(f"{report['per_row_count']} run once per row; "
+                  f"{report['wasted_only_count']} buy a prefetch query and "
+                  f"never read it.")
+        print()
+        print(report["note"])
+
+    if args.fail_on_findings and report["per_row_count"]:
+        return EXIT_FINDINGS
+    return EXIT_OK
+
+
 def _cmd_loops(args: argparse.Namespace) -> int:
     report = queries_in_loops(
         search_path=args.search_path,
@@ -1966,6 +2002,7 @@ def _cmd_project_info(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The full CLI: one subcommand per check, plus the aggregate ones."""
     parser = argparse.ArgumentParser(
         prog="django-chainsaw",
         description="Analyse a Django project: cascades, N+1 candidates, migration safety.",
@@ -2175,6 +2212,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fail-on-findings", action="store_true",
                    help="exit 1 on any query that runs once per row")
     p.set_defaults(func=_cmd_loops)
+
+    p = sub.add_parser("prefetch",
+                       help="prefetches paid for and then re-queried anyway")
+    p.add_argument("--search-path", metavar="DIR")
+    p.add_argument("--include-tests", action="store_true",
+                   help="also report inside test files")
+    p.add_argument("--fail-on-findings", action="store_true",
+                   help="exit 1 on any prefetch defeated once per row")
+    p.set_defaults(func=_cmd_prefetch)
 
     p = sub.add_parser("fix", help="turn findings into code, and say which are safe")
     p.add_argument("--tenant-root", default="auth.User", metavar="app.Model")

@@ -44,6 +44,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | [`money_precision`](money.md) | decimal amounts that stop being exact |
 | [`celery_arguments`](celery.md) | model instances handed to tasks, and wrong argument counts |
 | [`queries_in_loops`](loop-queries.md) | database work written inside a loop, split by its fix |
+| [`defeated_prefetches`](prefetch.md) | prefetches paid for and then re-queried by the accessor |
 | [`request_impact`](impact.md) | findings grouped by the entry points that reach them |
 | [`choice_typos`](choices.md) | literals a field's `choices` will never match |
 | [`multiplied_aggregates`](aggregates.md) | counts and sums a join has multiplied |
@@ -92,6 +93,7 @@ Every check here answers a question with a consequence attached:
 | Where does money stop being exact? | `money_precision` |
 | What does the worker actually receive? | `celery_arguments` |
 | Which loop asks the database the same thing N times? | `queries_in_loops` |
+| Which prefetch is bought and then thrown away? | `defeated_prefetches` |
 | I have three hundred findings - where do I start? | `request_impact` |
 | Why does this filter always return nothing? | `choice_typos` |
 | Why is this dashboard number too high? | `multiplied_aggregates` |

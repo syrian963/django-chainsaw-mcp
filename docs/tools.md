@@ -745,6 +745,24 @@ tests are skipped.
 
 Documented in [`loop-queries.md`](loop-queries.md).
 
+## `defeated_prefetches`
+
+Relations that were prefetched and then re-queried anyway, because the
+accessor asked the related manager something its cache cannot answer.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `search_path` | project root | directory to scan |
+| `include_tests` | `false` | also report inside test files |
+
+`.count()`, `.exists()`, `.all()` and a slice read the prefetch cache and are
+never reported. `.filter()`, `.order_by()`, `.first()`, `.values_list()` and
+the rest re-query once per parent object and are. Reported only where the
+prefetch and the accessor are provably the same object: bound in the same
+scope, or the loop variable iterating it.
+
+Documented in [`prefetch.md`](prefetch.md).
+
 ---
 
 ## Resource: `django://models`

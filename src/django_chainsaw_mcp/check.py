@@ -39,6 +39,7 @@ from .loop_queries import queries_in_loops
 from .migrations import migration_risk
 from .money import money_precision
 from .on_commit import escaping_side_effects
+from .prefetch import defeated_prefetches
 from .project import enable_source_cache, get_profile, project_root
 from .scan import scan_templates
 from .serializer_nplusone import serializer_nplusone
@@ -398,6 +399,18 @@ def _from_loops(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _from_prefetch(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Defeated prefetches in the merged shape."""
+    out = []
+    for f in report.get("findings", []):
+        out.append(_finding(
+            "prefetch", f["severity"],
+            f"{f['call']} re-queries a relation that was already prefetched",
+            f"{f['file']}:{f['line']}", f["why"], f["fix"],
+        ))
+    return out
+
+
 def _from_migrations(report: dict[str, Any]) -> list[dict[str, Any]]:
     # This check is about migrations that have not run yet, and it learns
     # which those are by reading django_migrations. When that read fails it
@@ -441,6 +454,7 @@ _CHECKS: dict[str, tuple[Callable[..., Any], Callable[[dict], dict], Callable]] 
     "money": (money_precision, lambda o: {}, _from_money),
     "celery": (celery_arguments, lambda o: {}, _from_celery),
     "loops": (queries_in_loops, lambda o: {}, _from_loops),
+    "prefetch": (defeated_prefetches, lambda o: {}, _from_prefetch),
     "choices": (choice_typos, lambda o: {}, _from_choices),
     "aggregates": (multiplied_aggregates, lambda o: {}, _from_aggregates),
     "dangling": (dangling_references, lambda o: {}, _from_dangling),
@@ -469,6 +483,7 @@ _REQUIRES: dict[str, str] = {
     "money": "django",
     "celery": "django",
     "loops": "django",
+    "prefetch": "django",
     "choices": "django",
     "aggregates": "django",
     "dangling": "django",
