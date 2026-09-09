@@ -80,6 +80,34 @@ whole was worthless. `check` now says so before anything else:
     WARNING: This project has no models. Django booted, so the settings
     module imports, but nothing in INSTALLED_APPS defines a model.
 
+## What a new check found before it was written
+
+`defeated_prefetches` was built after the projects were already cloned, so it
+is the one check whose yield on real code was known before it shipped. Nine of
+them — Wagtail, Saleor, django-oscar, Misago, Weblate, NetBox, pretix,
+DefectDojo, Read the Docs — contain 696 `prefetch_related` sites between them.
+Seven of those prefetches are re-queried by the accessor that reads them, and
+all seven were read by hand and confirmed:
+
+| Project | Site |
+| --- | --- |
+| Wagtail | `wagtail/admin/views/pages/edit.py:207` |
+| Saleor | `graphql/meta/permissions.py:120`, `:124`, `:163` |
+| Saleor | `graphql/product/mutations/product_variant/product_variant_delete.py:112` |
+| pretix | `src/pretix/base/services/invoices.py:277` |
+| DefectDojo | `dojo/jira/helper.py:868` |
+
+Saleor's variant one is the clearest: the prefetch is two lines above the
+accessor, under a comment reading "Get cached variant with related fields".
+
+The same projects also killed the two checks proposed before it. A
+`Meta.ordering` spanning a relation appears 6 times in 562 orderings, which is
+too rare to be worth a check. `.exclude(field=value)` on a nullable field
+appears 588 times outside tests, which is plenty — but the premise was wrong:
+Django emits `NOT (x = v AND x IS NOT NULL)` and keeps the NULL row, so all
+588 would have been false positives. Both were dropped before a line was
+written.
+
 ## Checks that have never fired on real code
 
 Silence is not evidence of correctness, so both are stated with their
