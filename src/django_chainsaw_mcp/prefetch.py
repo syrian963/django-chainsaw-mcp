@@ -64,7 +64,6 @@ throws the cache away.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import Any
 
 from .project import parse_file, resolve_root

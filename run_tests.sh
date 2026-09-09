@@ -20,6 +20,9 @@ suite() {
   fi
 }
 
+# CI lints before it tests. Leaving it out here meant seventeen green suites
+# locally and a red pipeline on an unused import.
+suite "ruff"             uv run ruff check src/ tests/
 suite "portability_check.sh" bash portability_check.sh
 suite "docs_check.sh"      bash docs_check.sh
 suite "coverage_check.sh"      bash coverage_check.sh
