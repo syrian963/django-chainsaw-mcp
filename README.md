@@ -18,6 +18,23 @@ describing it. A handful of the checks reach past Django — one needs nothing
 but Python, one reads FastAPI routes, one reads SQLAlchemy — and the rest read
 the app registry.
 
+## Install
+
+```bash
+uvx django-chainsaw-mcp        # run it without installing
+uv pip install django-chainsaw-mcp
+```
+
+It needs two environment variables - the project to read and the settings
+module to read it through - and `docs/clients.md` has the config block for
+Claude Code, Claude Desktop, VS Code and Cursor. `django-chainsaw
+project-info` is the one command that proves the setup before anything else.
+
+The server is listed in the MCP registry as
+`io.github.syrian963/django-chainsaw-mcp`; `server.json` in this repository is
+the manifest, and a documentation gate keeps its version and its environment
+variables matching the code.
+
 ## Why this exists
 
 I work on a large Django codebase, and the questions that cost real time are

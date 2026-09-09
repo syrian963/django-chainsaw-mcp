@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.syrian963/django-chainsaw-mcp",
+  "title": "Django Chainsaw",
+  "description": "Analyses a Django project rather than describing it: what a delete cascades to, where the N+1 queries are, which pending migration blocks writes or breaks the running code mid-deploy, and which queries read tenant-scoped rows without scoping them.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/syrian963/django-chainsaw-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/syrian963/django-chainsaw-mcp",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "django-chainsaw-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DJANGO_CHAINSAW_PROJECT_PATH",
+          "description": "Absolute path to the Django project to analyse - the directory containing manage.py, or whichever directory the settings module is importable from.",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "DJANGO_CHAINSAW_SETTINGS_MODULE",
+          "description": "Dotted path to the settings module, for example myproject.settings. Point it at the settings the site actually runs on: a base or partial module can import cleanly and load no models, and the server says so when that happens.",
+          "isRequired": true,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

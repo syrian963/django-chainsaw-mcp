@@ -10,8 +10,10 @@ requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE", "NOTICE"]
 keywords = [
-    "django", "mcp", "static-analysis", "n+1", "orm",
-    "migrations", "code-review", "drf", "fastapi",
+    "django", "mcp", "mcp-server", "model-context-protocol",
+    "static-analysis", "code-quality", "code-review", "linter",
+    "n+1", "orm", "migrations", "drf", "django-rest-framework",
+    "fastapi", "claude", "ai", "llm", "developer-tools",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
