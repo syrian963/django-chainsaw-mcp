@@ -1,6 +1,6 @@
 # django-chainsaw-mcp
 
-![release](https://img.shields.io/badge/release-v0.1.2-1f6feb?style=for-the-badge)
+![release](https://img.shields.io/badge/release-v0.1.3-1f6feb?style=for-the-badge)
 ![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
 ![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
 ![CLI commands](https://img.shields.io/badge/CLI%20commands-35-6e7681?style=for-the-badge)

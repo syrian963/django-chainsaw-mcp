@@ -3,7 +3,7 @@
   "name": "io.github.syrian963/django-chainsaw-mcp",
   "title": "Django Chainsaw",
   "description": "Finds what will hurt in a Django project: cascades, N+1, unsafe migrations, tenant leaks.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "repository": {
     "url": "https://github.com/syrian963/django-chainsaw-mcp",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "django-chainsaw-mcp",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

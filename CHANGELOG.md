@@ -3,6 +3,20 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-09-09
+
+### Changed
+
+- **The release publishes itself to the MCP registry.** Three releases meant
+  three GitHub device flows, and the registry token expired during two of them
+  - in the window between the PyPI upload and the registry call, which nobody
+  can shorten by hand. The workflow now uses `mcp-publisher login
+  github-oidc`, the same mechanism PyPI trusted publishing already uses
+  here: the runner proves who it is, and there is no token to expire, leak
+  or rotate. It runs after the PyPI job, because the registry checks that
+  the version the manifest names really exists, and it refuses to run if
+  the tag and `server.json` disagree.
+
 ## [0.1.2] - 2026-09-09
 
 Found by installing 0.1.1 from PyPI into a clean environment and running it
