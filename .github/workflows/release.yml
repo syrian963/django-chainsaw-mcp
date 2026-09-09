@@ -105,3 +105,24 @@ jobs:
         run: |
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
+
+  github_release:
+    # PyPI and the registry were automated and the Releases page was not, so
+    # it sat on v0.1.0 while the badge said v0.1.4 and four tags had shipped
+    # in between. Anyone browsing the repository read the stale one.
+    needs: registry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The section the changelog already has for this tag
+        run: python release_notes.py "$GITHUB_REF_NAME" > notes.md
+      - name: Publish the release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag --latest
+        env:
+          GH_TOKEN: ${{ github.token }}
