@@ -59,7 +59,7 @@ Each page explains what the check is for, how it works, and what it cannot see.
 | --- | --- |
 | **[What it cannot do](limitations.md)** | the consolidated blind spots, and which were closed |
 | [Architecture](architecture.md) | how it fits together, and why the bootstrap drives the design |
-| [Authorship and licence](authorship.md) | AGPL, signed commits, what actually protects the work |
+| [Authorship and licence](authorship.md) | MIT, signed commits, what actually protects the work |
 | [Contributing](../CONTRIBUTING.md) | setup, test style, how to add a tool |
 | [Changelog](../CHANGELOG.md) | including every bug found and what it looked like |
 

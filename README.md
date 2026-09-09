@@ -10,7 +10,7 @@
 ![coverage](https://img.shields.io/badge/coverage-87%25-2ea043?style=for-the-badge)
 ![python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-f1c40f?style=for-the-badge&logo=python&logoColor=white)
 ![django](https://img.shields.io/badge/django-4.2%20%E2%80%93%206.1-0C4B33?style=for-the-badge&logo=django&logoColor=white)
-![license](https://img.shields.io/badge/license-AGPL--3.0-6e7681?style=for-the-badge)
+![license](https://img.shields.io/badge/license-MIT-6e7681?style=for-the-badge)
 
 
 An MCP server and CLI that **analyses** a Django project rather than

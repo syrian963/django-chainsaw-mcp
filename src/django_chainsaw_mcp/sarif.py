@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 """Emit findings as SARIF, so they land on the diff instead of in a log.
 

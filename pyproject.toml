@@ -7,7 +7,7 @@ authors = [
     { name = "Mohammad Alsakka", email = "mnouralsakka@gmail.com" }
 ]
 requires-python = ">=3.12"
-license = "AGPL-3.0-or-later"
+license = "MIT"
 license-files = ["LICENSE", "NOTICE"]
 keywords = [
     "django", "mcp", "static-analysis", "n+1", "orm",

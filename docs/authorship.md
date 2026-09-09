@@ -13,7 +13,7 @@ have I allowed*.
 
 | File | Does what |
 | --- | --- |
-| `LICENSE` | the full AGPL-3.0 text, unmodified |
+| `LICENSE` | the full MIT licence text, unmodified |
 | `NOTICE` | copyright line, plain-language summary, attribution requirement |
 | `CITATION.cff` | GitHub renders a "Cite this repository" button from it |
 | SPDX headers | two lines at the top of every source file |
@@ -24,7 +24,7 @@ the usual way attribution disappears.
 
 ```python
 # SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 ```
 
 ## How this was written
@@ -56,43 +56,36 @@ Judgement is the part that does not come free, and it is the part visible in
 the history: what was measured before it was built, what was deleted after it
 was measured, and what is documented as still unknown.
 
-## Why AGPL-3.0, and what it costs
+## Why MIT
 
-The ordinary GPL is triggered by **distributing** software. A great deal of
-software is never distributed: it runs on a server and users only see its
-output. Section 13 of the AGPL closes that gap. Anyone who lets users interact
-with a modified version over a network must offer those users the source.
+This started under AGPL-3.0, which was the cautious choice: it is the only
+common licence that also covers software people reach over a network, and it
+makes commercial appropriation legally awkward. It is also the licence a great
+many companies will not let their engineers depend on at all.
 
-| | Obligation |
-| --- | --- |
-| Reading it, using it, changing it for yourself | none |
-| Running it inside a company on your own code | none |
-| Distributing it, or offering a modified version as a service | publish your modifications under the same licence |
-| Removing the copyright notices | never permitted |
+The trade was written down here before it was made, and it decided this:
 
-**The honest trade.** AGPL keeps control and deters commercial appropriation. It
-also deters corporate users and contributors: many companies have a blanket ban
-on AGPL dependencies. Under MIT this project would be forked and shipped inside
-a paid product with no obligation beyond keeping a copyright line.
+| | AGPL-3.0 | MIT |
+| --- | --- | --- |
+| Use it inside a company | fine | fine |
+| Ship a modified version as a service | must publish the changes | no obligation |
+| A company with a licence policy | usually blocked outright | almost always allowed |
+| Somebody selling your work | must open their changes | may, with attribution |
 
-- **Control is the goal** → AGPL, which is what is set.
-- **Adoption and reputation are the goal** → MIT or Apache-2.0 get more of both.
+**Control was not the goal here; being used was.** A tool nobody is allowed to
+depend on does not get the bug reports that made this one worth anything -
+eighteen public projects found twelve defects in it, and the next twelve will
+come from people running it on code I will never see. AGPL is a good way to
+lose those people at the dependency review.
 
-Switching from AGPL to MIT later is easy while there is a single copyright
-holder. Switching from MIT to AGPL is not: every existing copy stays MIT
-forever. **Starting restrictive is the reversible choice**, which is the other
-reason it is set this way.
+The one obligation MIT keeps is the one that matters for authorship: the
+copyright notice travels with the copy. Every source file carries an SPDX
+header saying so, which is what survives somebody lifting a single file.
 
-## Dual licensing stays open
-
-The copyright holder is not bound by their own licence. AGPL for the public,
-and a separate commercial licence for a company that wants to use it without the
-source obligation. That model only works if the AGPL version is the public one
-from the beginning, which it now is.
-
-It also requires that every contributor either assigns copyright or signs a CLA,
-otherwise the commercial licence cannot be granted. Worth remembering before
-merging the first outside pull request.
+**The direction is the easy one.** Going from AGPL to MIT is a decision a sole
+copyright holder can simply make. Going back is not: every copy released under
+MIT stays MIT forever, and only new work could be relicensed. That asymmetry is
+worth knowing, and it is the reason this was not the starting position.
 
 ## Signed commits, the part that is actual proof
 

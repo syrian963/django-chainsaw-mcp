@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 """The two features that decide what CI is allowed to ignore.
 

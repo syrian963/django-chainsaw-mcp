@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Mohammad Alsakka <mnouralsakka@gmail.com>
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 """N+1 queries in DRF serializers, which is where they live in an API project.
 
