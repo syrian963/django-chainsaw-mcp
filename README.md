@@ -1,6 +1,6 @@
 # django-chainsaw-mcp
 
-![release](https://img.shields.io/badge/release-v0.1.0-1f6feb?style=for-the-badge)
+![release](https://img.shields.io/badge/release-v0.1.1-1f6feb?style=for-the-badge)
 ![checks](https://img.shields.io/badge/checks-21-2ea043?style=for-the-badge)
 ![MCP tools](https://img.shields.io/badge/MCP%20tools-36-8250df?style=for-the-badge)
 ![CLI commands](https://img.shields.io/badge/CLI%20commands-35-6e7681?style=for-the-badge)
@@ -30,10 +30,12 @@ module to read it through - and `docs/clients.md` has the config block for
 Claude Code, Claude Desktop, VS Code and Cursor. `django-chainsaw
 project-info` is the one command that proves the setup before anything else.
 
-The server is listed in the MCP registry as
-`io.github.syrian963/django-chainsaw-mcp`; `server.json` in this repository is
-the manifest, and a documentation gate keeps its version and its environment
-variables matching the code.
+The server is listed in the MCP registry, which reads `server.json` from this
+repository; a documentation gate keeps that manifest's version and environment
+variables matching the code. The registry checks that the PyPI package belongs
+to the same person, and the line below is the proof it looks for:
+
+mcp-name: io.github.syrian963/django-chainsaw-mcp
 
 ## Why this exists
 

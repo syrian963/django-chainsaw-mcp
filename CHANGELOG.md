@@ -3,6 +3,19 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-09
+
+Registry publication only. No behaviour changed.
+
+The MCP registry will not list a server unless the PyPI package can be shown
+to belong to the same person, and the proof it looks for is a line in the
+README **as published on PyPI**. That cannot be added by editing a file: it
+has to ship inside a release. Hence a version whose entire content is one
+line of text.
+
+- `mcp-name: io.github.syrian963/django-chainsaw-mcp` in the README, which is
+  what the registry reads.
+
 ## [0.1.0] - 2026-09-09
 
 The first release. 21 checks in the aggregate run, 36 MCP tools with five
