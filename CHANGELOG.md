@@ -16,6 +16,18 @@ every change so far belongs to this release.
 
 ### Fixed
 
+- **The HTML report carried none of the caveats the terminal learned this
+  week.** It is the file people forward, and it could list two thousand
+  findings without mentioning that the project had loaded no models - which
+  reads cleaner than the analysis was, the exact failure it already had a
+  section against. It now carries the registry and database warnings in red
+  above every count on the page, the checks that ran and found nothing with
+  what each looked at, and where the CPU went when a run passes ten seconds.
+  A healthy project gets no banner: one on every report is decoration, and
+  decoration is skipped on the report that needed reading.
+
+### Fixed
+
 - **`project-info` did not exist.** It is in the MCP server, in four
   documentation pages, in the bug report template - which asks reporters what
   `django-chainsaw project-info` said - and in an error message this tool
@@ -249,6 +261,19 @@ every change so far belongs to this release.
   suite last time". The module read the demo project out of environment
   variables another test file happened to set first. It asks for the project
   now.
+
+### Changed
+
+- **`deploy-safety` skips the files that cannot match.** Every name the
+  scanner looks for appears verbatim in the source, so one compiled
+  alternation answers "could this file contain any of them" before the AST
+  walk. Measured on a 2001-file project, three ways: **31% off** a scan for
+  three specific names, which is the ordinary case of a branch with two or
+  three pending destructive migrations; 10% off the 158-symbol run, where
+  names like `name` and `id` make nearly every file match; and nothing when
+  the scan already exits early. Findings identical in all three, and a test
+  pins that - including a symbol containing a regex character, which
+  unescaped would have matched anything.
 
 ### Changed
 

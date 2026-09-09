@@ -142,11 +142,37 @@ def _iter_files(root: Path) -> Iterable[Path]:
         yield path
 
 
+def _symbol_pattern(symbols: set[str]) -> re.Pattern[str] | None:
+    """One alternation over every symbol, or None when there is nothing to find.
+
+    Every match this visitor can make - an attribute, a bare name, a string
+    constant, a keyword argument - is a name that appears verbatim in the
+    source. A file whose text contains none of them cannot produce a hit, and
+    parsing and walking it is work with a known answer.
+    """
+    if not symbols:
+        return None
+    return re.compile("|".join(re.escape(symbol) for symbol in sorted(symbols)))
+
+
 def _scan_python(
-    path: Path, root: Path, symbols: set[str], model_symbols: set[str]
+    path: Path,
+    root: Path,
+    symbols: set[str],
+    model_symbols: set[str],
+    pattern: re.Pattern[str] | None = None,
 ) -> dict[str, list[Reference]]:
     try:
         source = read_source(path)
+    except OSError:
+        return {}
+
+    if pattern is None:
+        pattern = _symbol_pattern(symbols)
+    if pattern is not None and not pattern.search(source):
+        return {}
+
+    try:
         tree = parse_file(path)
     except (OSError, SyntaxError):
         return {}
@@ -205,13 +231,18 @@ def _scan_all(
     """
     found: dict[str, list[Reference]] = {symbol: [] for symbol in symbols}
     full: set[str] = set()
+    pattern = _symbol_pattern(symbols)
 
     for path in _iter_files(root):
         if len(full) == len(symbols):
             break
         wanted = symbols - full
         if path.suffix == _PY_SUFFIX:
-            hits = _scan_python(path, root, wanted, model_symbols & wanted)
+            # The pattern covers every symbol, including ones already full.
+            # A file it does not match cannot contain a wanted one either, and
+            # rebuilding the alternation per file would cost more than the
+            # walk it saves.
+            hits = _scan_python(path, root, wanted, model_symbols & wanted, pattern)
         else:
             hits = {
                 symbol: refs

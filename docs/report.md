@@ -50,11 +50,27 @@ the project.
 
 ## The caveats travel with the findings
 
-A report that looks cleaner than the analysis was is worse than no report. So
-the page also carries:
+A report that looks cleaner than the analysis was is worse than no report, and
+this is the file people forward. So the page also carries:
 
+- **Whether the right project loaded at all.** A settings module can import
+  cleanly and define no models, and then eighteen of the twenty-one checks
+  report nothing - correctly, and uselessly. That warning is red and sits
+  above every count on the page, because it invalidates all of them.
+- **Whether the database answers.** Nothing here needs it, but the tool
+  imports the modules that declare serializers, views and URLs, and one that
+  touches the database while being imported waits out a connect timeout. On
+  one real project that turned a 28-second check into a 567-second one.
 - **Checks that could not run**, with their error, listed as *unverified*
   rather than omitted.
+- **Checks that ran and found nothing, with what they looked at.** "0
+  findings" reads as clean and can equally mean the check found nothing to
+  examine. `celery: tasks found 12, dispatches checked 41` is a clean zero; a
+  check that reports no coverage at all is named as such, because that zero
+  cannot be read either way.
+- **Where the CPU went**, when a run passes ten seconds, with the share per
+  check and the names `--skip` takes. If the machine was busy - wall clock far
+  above CPU - the page says the shares cannot be compared.
 - **Checks that do not apply**, grouped by reason.
 - **What the endpoint grouping cannot say**: how many findings no entry point
   reaches, how many of those are in a method something calls by name on an

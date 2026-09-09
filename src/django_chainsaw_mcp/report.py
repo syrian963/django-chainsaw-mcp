@@ -100,6 +100,32 @@ def _payload(
             for name in failed
         ],
         "checks_not_applicable": findings_report.get("checks_not_applicable") or {},
+        "registry_warning": findings_report.get("registry_warning"),
+        "database_warning": findings_report.get("database_warning"),
+        # A check that ran and found nothing, with what it looked at. The
+        # difference between a clean zero and a blind one belongs in the
+        # artifact somebody forwards, not only in the terminal it was run in.
+        "checks_clean": [
+            {
+                "name": name,
+                "examined": state.get("examined") or {},
+                "cpu_seconds": state.get("cpu_seconds"),
+            }
+            for name, state in sorted(ran.items())
+            if state.get("ok") and not state.get("findings")
+        ],
+        "timings": sorted(
+            (
+                {
+                    "name": name,
+                    "cpu_seconds": state.get("cpu_seconds") or 0.0,
+                    "seconds": state.get("seconds") or 0.0,
+                }
+                for name, state in ran.items()
+                if state.get("cpu_seconds") is not None
+            ),
+            key=lambda row: -row["cpu_seconds"],
+        ),
         "frameworks": findings_report.get("frameworks") or {},
         "entries": entries,
         "impact": None if impact_report is None else {
@@ -192,6 +218,10 @@ button[aria-pressed=true] { background: var(--accent); border-color: var(--accen
 }
 .caveat h2 { font-size: 14px; margin: 0 0 6px; }
 .caveat p { margin: 0 0 8px; color: var(--muted); }
+/* A project that did not really load, or a database that will make the
+   imports wait, invalidates every count below it. Loud on purpose. */
+.caveat.alarm { border-left-color: var(--critical); }
+.caveat.alarm h2 { color: var(--critical); }
 .empty { color: var(--muted); padding: 24px 0; }
 """
 
@@ -343,6 +373,14 @@ def html_report(
         )
 
     caveats = []
+    # Before any count on this page: was the right project loaded, and could
+    # the imports it needed run without waiting on a database.
+    for warning in (data.get("registry_warning"), data.get("database_warning")):
+        if warning:
+            caveats.append(
+                "<div class='caveat alarm'><h2>Read this before the numbers</h2>"
+                f"<p>{html.escape(str(warning))}</p></div>"
+            )
     if data["checks_failed"]:
         rows = "".join(
             f"<li class='mono'>{html.escape(item['name'])}: "
@@ -366,6 +404,48 @@ def html_report(
             f"<div class='caveat'><h2>{len(data['checks_not_applicable'])} check(s) "
             f"do not apply to this project</h2><ul>{rows}</ul></div>"
         )
+    if data.get("checks_clean"):
+        rows = "".join(
+            "<li><span class='mono'>{name}</span><p>{detail}</p></li>".format(
+                name=html.escape(entry["name"]),
+                detail=html.escape(
+                    ", ".join(
+                        f"{key.replace('_', ' ')} {value}"
+                        for key, value in entry["examined"].items()
+                    )
+                    or "does not report its coverage, so this zero cannot be read"
+                ),
+            )
+            for entry in data["checks_clean"]
+        )
+        caveats.append(
+            f"<div class='caveat'><h2>{len(data['checks_clean'])} check(s) ran "
+            "and found nothing. What each one looked at</h2>"
+            f"<ul>{rows}</ul></div>"
+        )
+
+    if data.get("timings"):
+        total = sum(row["cpu_seconds"] for row in data["timings"])
+        wall = sum(row["seconds"] for row in data["timings"])
+        if total >= 10:
+            rows = "".join(
+                f"<li><span class='mono'>{html.escape(row['name'])}</span>"
+                f"<p>{row['cpu_seconds']:.1f}s CPU"
+                f" &middot; {row['cpu_seconds'] / total * 100:.0f}%</p></li>"
+                for row in data["timings"][:5]
+            )
+            busy = (
+                "<p>The machine was busy: most of the wall time was waiting, "
+                "not working, so compare the CPU figures and not the total.</p>"
+                if total and wall > total * 1.5 else ""
+            )
+            caveats.append(
+                f"<div class='caveat'><h2>Where the {total:.0f}s of CPU went</h2>"
+                f"<ul>{rows}</ul>{busy}"
+                "<p>These names are what <span class='mono'>--skip</span> "
+                "takes.</p></div>"
+            )
+
     if data["impact"]:
         impact = data["impact"]
         caveats.append(
