@@ -18,6 +18,31 @@ describing it. A handful of the checks reach past Django — one needs nothing
 but Python, one reads FastAPI routes, one reads SQLAlchemy — and the rest read
 the app registry.
 
+## Why this exists
+
+I work on a large Django codebase, and the questions that cost real time are
+never *what is in this project*. They are: if I delete this customer, what else
+goes with it? Is this migration safe to deploy while the old pods are still
+running? Which of these three hundred findings can a request actually reach?
+
+Every tool I could point at that codebase answered the first kind of question.
+I would still be reading through `models.py` by hand to answer the second kind,
+and so was everyone else. So I wrote something that answers the second kind,
+and kept it honest by pointing it at other people's code.
+
+Eighteen public Django projects, from channels at 55 files to Saleor at 4332.
+They found **twelve defects in this tool** that neither its own fixtures nor a
+single private codebase had shown - a virtualenv inside a project directory
+making every installed package look like a project app, a decorator that meant
+the exact opposite of what a check assumed, a check that presented a project's
+entire migration history as unshipped. Each one is in the changelog with the
+measurement that found it. `docs/tested-against.md` has the whole list,
+including the two checks that have **never** fired on real code and the number
+of things they examined before finding nothing.
+
+That is the part worth judging this on. Writing a check is easy; knowing
+whether it is right, and saying so when you cannot tell, is the work.
+
 Several Django MCP servers already exist. They answer *what exists*: list the
 models, dump the schema, run the ORM, read the settings. None of the ones I
 looked at answer *what will hurt*:

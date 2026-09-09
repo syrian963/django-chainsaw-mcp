@@ -27,6 +27,35 @@ the usual way attribution disappears.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 ```
 
+## How this was written
+
+Claude wrote most of the lines. I decided what to build, rejected what was not
+worth building, reviewed every change, and ran the measurements that settled
+the arguments. Saying that plainly is cheaper than having somebody work it out
+later.
+
+What that looked like in practice, because the distinction matters more than
+the label:
+
+- **Two finished features were deleted after measurement.** An untyped
+  comparison route in the `choices` check produced five false positives out of
+  five on real code. Min/Max/Avg in the aggregates check are not affected by
+  the row duplication it looks for, so flagging them was wrong. Both worked.
+  Both went.
+- **A call-graph rule was rejected before it was finished** because measuring
+  it first showed it would resolve 8% of unknown calls and attribute 25 more
+  findings. Not worth the complexity.
+- **The tool was pointed at eighteen public projects**, and each defect they
+  exposed is in the changelog with the number that found it. Twelve of them.
+- **Wrong claims of my own were corrected in public**: a performance figure
+  taken from a contended machine, a fix whose first version suppressed a real
+  finding, a red-green check that passed for the wrong reason three times in
+  one file.
+
+Judgement is the part that does not come free, and it is the part visible in
+the history: what was measured before it was built, what was deleted after it
+was measured, and what is documented as still unknown.
+
 ## Why AGPL-3.0, and what it costs
 
 The ordinary GPL is triggered by **distributing** software. A great deal of
@@ -117,7 +146,11 @@ Ranked by how much they help, which is not the order people expect:
 make the copy obviously derivative and the theft provable, and that is the
 realistic goal.
 
-The strongest single item on that list is the first one, and it is already
-there: this repository's history contains the reasoning, the wrong turns, and
-the bugs found along the way. That is very hard to fake and very easy to
-demonstrate.
+The strongest single item on that list is the first one, and it is what this
+repository actually has: the reasoning, the wrong turns, the measurements that
+contradicted them, and the features deleted afterwards. A copy has one commit
+and no argument in it.
+
+It is also the honest answer to *how much of this did you write*. The history
+does not hide that Claude wrote most of the lines, and it does not need to -
+what it shows is which of them survived contact with a measurement.
