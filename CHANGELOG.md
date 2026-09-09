@@ -3,7 +3,11 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-09-09
+
+Found by installing 0.1.1 from PyPI into a clean environment and running it
+against a project it had never seen. Every test before this one used the
+source tree, which is not what anybody else gets.
 
 ### Fixed
 

@@ -678,6 +678,7 @@ def test_every_check_reports_what_it_looked_at(django_project):
     server's own instructions promise a client that an empty result says which
     kind it is.
     """
+
     from django_chainsaw_mcp.check import run_all
 
     report = run_all(tenant_root="shop.Customer")
@@ -1057,6 +1058,89 @@ def test_a_standard_entry_point_still_gets_its_rewrite(tmp_path, django_project)
     assert rewritten, "a .filter() queryset has somewhere to insert the scope"
     assert "customer=request.user" in rewritten[0].new
     assert rewritten[0].new != rewritten[0].old
+
+
+def test_no_fix_anywhere_proposes_its_own_input(django_project, tmp_path):
+    """The invariant, rather than the one place it was broken.
+
+    `datetimes` already guarded this - `if replaced == original: continue` -
+    and `tenancy` did not, which is how 13 of 37 suggestions on healthchecks
+    came to be diffs whose two halves were the same line. Checking the one
+    site that was wrong proves nothing about the next rewriter somebody adds.
+
+    Built from the demo project, which exercises every check that produces a
+    fix.
+    """
+    from django_chainsaw_mcp.fixes import build_fixes
+    from django_chainsaw_mcp.project import project_root
+
+    fixsets = [build_fixes(_raw_reports(), project_root())]
+
+    # And the shapes the demo project does not have. Without these the
+    # invariant passes for lack of a case: reverting the guard left it green,
+    # because nothing in the fixtures starts at a custom manager method.
+    fixsets.append(build_fixes(_awkward_reports(tmp_path), tmp_path))
+
+    produced = [f for fixset in fixsets for f in fixset.fixes]
+    assert produced, "no fixes were built, so this proves nothing"
+
+    identical = [
+        f for f in produced
+        if f.old is not None and f.new is not None and f.old == f.new
+    ]
+    assert not identical, (
+        "a fix that proposes its own input is a diff whose two halves are the "
+        f"same text: {[(f.check, f.path, f.line) for f in identical]}"
+    )
+
+
+def _awkward_reports(tmp_path) -> dict:
+    """Querysets with no standard entry point for a rewriter to grab."""
+    (tmp_path / "views.py").write_text(
+        "def a(request):\n"
+        "    return Order.objects.for_user(request.user)\n"
+        "def b(request):\n"
+        "    return Order.objects.visible_to(request.user).first()\n"
+        "def c(request):\n"
+        "    return Order.objects\n"
+    )
+    return {
+        "tenancy": {
+            "findings": [
+                {
+                    "model": "shop.Order",
+                    "file": "views.py",
+                    "line": line,
+                    "why": "unscoped",
+                    "owner_path": "customer",
+                    "chain": "objects",
+                    "severity": "high",
+                }
+                for line in (2, 4, 6)
+            ]
+        }
+    }
+
+
+def _raw_reports() -> dict:
+    """The per-check reports `build_fixes` reads, straight from the checks."""
+    from django_chainsaw_mcp.datetimes import datetime_audit
+    from django_chainsaw_mcp.indexes import missing_indexes
+    from django_chainsaw_mcp.serializers import serializer_exposure
+    from django_chainsaw_mcp.tenancy import find_unscoped_queries
+
+    out = {}
+    for name, fn in (
+        ("datetimes", datetime_audit),
+        ("serializers", serializer_exposure),
+        ("tenancy", lambda: find_unscoped_queries(tenant_root="shop.Customer")),
+        ("indexes", missing_indexes),
+    ):
+        try:
+            out[name] = fn()
+        except Exception:
+            continue
+    return out
 
 
 def test_an_unknown_root_is_still_an_error_and_names_what_exists(django_project):
