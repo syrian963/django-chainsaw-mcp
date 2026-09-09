@@ -20,15 +20,30 @@ the app registry.
 
 ## Install
 
+**It has to run in an interpreter that can import your project.** Everything
+here reads the app registry, which means `django.setup()`, your settings and
+your apps. So install it into the environment your project already uses:
+
 ```bash
-uvx django-chainsaw-mcp        # run it without installing
-uv pip install django-chainsaw-mcp
+/path/to/project/.venv/bin/python -m pip install django-chainsaw-mcp
+# or, with uv
+uv pip install --python /path/to/project/.venv/bin/python django-chainsaw-mcp
+```
+
+A plain `uvx django-chainsaw-mcp` will start and then fail every check, because
+`uvx` gives it an isolated environment with no trace of your project. If you
+would rather not install anything, hand `uv` the dependencies instead:
+
+```bash
+uvx --with-requirements requirements.txt --from django-chainsaw-mcp django-chainsaw check
 ```
 
 It needs two environment variables - the project to read and the settings
 module to read it through - and `docs/clients.md` has the config block for
-Claude Code, Claude Desktop, VS Code and Cursor. `django-chainsaw
-project-info` is the one command that proves the setup before anything else.
+Claude Code, Claude Desktop, VS Code and Cursor, each pointing at the
+project's own interpreter. `django-chainsaw project-info` is the one command
+that proves the setup before anything else, and it says which half is
+missing.
 
 The server is listed in the MCP registry, which reads `server.json` from this
 repository; a documentation gate keeps that manifest's version and environment

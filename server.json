@@ -15,14 +15,13 @@
       "registryBaseUrl": "https://pypi.org",
       "identifier": "django-chainsaw-mcp",
       "version": "0.1.3",
-      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "DJANGO_CHAINSAW_PROJECT_PATH",
-          "description": "Absolute path to the Django project to analyse - the directory containing manage.py, or whichever directory the settings module is importable from.",
+          "description": "Absolute path to the Django project to analyse - the directory containing manage.py, or whichever directory the settings module is importable from. This server must run in an interpreter that can import that project, so install it into the project's own environment rather than an isolated one.",
           "isRequired": true,
           "isSecret": false
         },
