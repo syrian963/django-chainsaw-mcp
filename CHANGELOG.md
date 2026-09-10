@@ -3,7 +3,25 @@
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.5] - 2026-09-10
+
+A delivery release. Both changes were already on `main`; neither had reached
+anybody, because the places people actually read are the published package and
+the PyPI page, and a merge updates neither.
+
+### Changed
+
+- **The PyPI page was still showing the 615-line README.** The front page was
+  rewritten down to 270 lines — the narrative moved to `docs/why.md`, the
+  pull-request workflow came up out of line 411, and a sentence saying there
+  is no model in the loop was added because its absence had measurably
+  confused a reader. All of that landed on `main` after 0.1.4 was tagged, so
+  the long description on PyPI was the old one.
+
+  That matters more than it sounds: the repository went public five days ago
+  and is not indexed yet, while the PyPI page is. For now it is the only page
+  a search engine can find, and it was showing the version of the text this
+  release exists to replace.
 
 ### Fixed
 
@@ -18,7 +36,8 @@ Versioning is [semantic](https://semver.org/spec/v2.0.0.html).
   and on 6.1. That is the claim the pages make now. Every method the check does
   report re-queries on both, so no finding depended on the wrong sentence — but
   a repository that asks other people to distrust unmeasured claims does not
-  get to ship one.
+  get to ship one. The corrected docstring only reaches anyone who installs the
+  package with this release; 0.1.4 on PyPI still carries the wrong sentence.
 
 ## [0.1.4] - 2026-09-09
 
